@@ -1,0 +1,148 @@
+name: Build Android 15 Raspberry Pi 4 image
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_prerelease:
+        description: Publish successful artifacts as a GitHub prerelease
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android15-rpi4-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build flashable Raspberry Pi 4 image
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - android-build
+    timeout-minutes: 720
+    env:
+      TA_RELEASEKEY_PK8_B64: ${{ secrets.TA_RELEASEKEY_PK8_B64 }}
+      TA_RELEASEKEY_X509_B64: ${{ secrets.TA_RELEASEKEY_X509_B64 }}
+      TA_PLATFORM_PK8_B64: ${{ secrets.TA_PLATFORM_PK8_B64 }}
+      TA_PLATFORM_X509_B64: ${{ secrets.TA_PLATFORM_X509_B64 }}
+      TA_DEVICE_TLS_FULLCHAIN_B64: ${{ secrets.TA_DEVICE_TLS_FULLCHAIN_B64 }}
+      TA_DEVICE_TLS_PRIVKEY_B64: ${{ secrets.TA_DEVICE_TLS_PRIVKEY_B64 }}
+      TA_FULLSCREEN_TLS_FULLCHAIN_B64: ${{ secrets.TA_FULLSCREEN_TLS_FULLCHAIN_B64 }}
+      TA_FULLSCREEN_TLS_PRIVKEY_B64: ${{ secrets.TA_FULLSCREEN_TLS_PRIVKEY_B64 }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Verify build host capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          free_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
+          memory_kib="$(awk '/^(MemTotal|SwapTotal):/ {total += $2} END {print total}' /proc/meminfo)"
+          required_disk_kib=$((300 * 1024 * 1024))
+          required_memory_kib=$((40 * 1024 * 1024))
+          echo "Free workspace disk: $((free_kib / 1024 / 1024)) GiB"
+          echo "RAM plus swap: $((memory_kib / 1024 / 1024)) GiB"
+          if (( free_kib < required_disk_kib )); then
+            echo "ERROR: Android build requires at least 300 GiB of free workspace disk." >&2
+            exit 1
+          fi
+          if (( memory_kib < required_memory_kib )); then
+            echo "ERROR: Android build requires at least 32 GiB RAM plus 8 GiB swap." >&2
+            exit 1
+          fi
+
+      - name: Install Ubuntu build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes \
+            bc bison build-essential ccache cpio curl device-tree-compiler dosfstools \
+            flex fontconfig g++-multilib gcc-multilib gdisk gettext git-core git-lfs \
+            gnupg lib32ncurses5-dev lib32z1-dev libc6-dev-i386 libglib2.0-dev \
+            libgl1-mesa-dev libgmp-dev libgnutls28-dev libmpc-dev libncurses5 \
+            libssl-dev libxml2-utils libx11-dev lz4 meson mtools ninja-build \
+            pkg-config python-is-python3 python3-dev python3-jinja2 python3-mako \
+            python3-ply python3-pyelftools python3-yaml rsync swig unzip wget \
+            x11proto-core-dev xsltproc zip zlib1g-dev zstd
+          git lfs install
+
+      - name: Install repo tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/android-tools"
+          curl --fail --location --retry 3 \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            --output "$RUNNER_TEMP/android-tools/repo"
+          chmod +x "$RUNNER_TEMP/android-tools/repo"
+          echo "$RUNNER_TEMP/android-tools" >> "$GITHUB_PATH"
+
+      - name: Validate Android 15 baseline
+        run: bash tools/check-android15-port.sh
+
+      - name: Sync and patch Android sources
+        run: bash unfold_aosp.sh
+
+      - name: Prepare signing and TLS material
+        run: bash tools/prepare-build-credentials.sh
+
+      - name: Build Raspberry Pi 4 image
+        run: bash build_rpi4.sh
+
+      - name: Package flashable artifacts
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="$GITHUB_WORKSPACE/artifacts"
+          mkdir -p "$artifact_root"
+          short_sha="${GITHUB_SHA:0:12}"
+          prefix="TeslaAndroid-15-rpi4-$short_sha"
+
+          sdcard="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name sdcard.img -print -quit)"
+          images="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name images.tar.gz -print -quit)"
+          ota="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name '*-ota-*.zip' -print -quit)"
+
+          [[ -n "$sdcard" ]] || { echo "ERROR: sdcard.img was not produced" >&2; exit 1; }
+          [[ -n "$images" ]] || { echo "ERROR: images.tar.gz was not produced" >&2; exit 1; }
+          [[ -n "$ota" ]] || { echo "ERROR: OTA package was not produced" >&2; exit 1; }
+
+          zstd -T0 -19 "$sdcard" -o "$artifact_root/$prefix-flashable.img.zst"
+          cp "$images" "$artifact_root/$prefix-fastboot-images.tar.gz"
+          cp "$ota" "$artifact_root/$prefix-ota.zip"
+          (
+            cd "$artifact_root"
+            sha256sum * > SHA256SUMS
+          )
+          echo "artifact_name=$prefix" >> "$GITHUB_OUTPUT"
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Publish GitHub prerelease
+        if: ${{ inputs.publish_prerelease }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: android15-rpi4-build-${{ github.run_number }}
+        shell: bash
+        run: |
+          gh release create "$RELEASE_TAG" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Android 15 Raspberry Pi 4 build ${{ github.run_number }}" \
+            --notes "Automated Android 15 Raspberry Pi 4 bring-up build from $GITHUB_SHA. Hardware validation is still required."
