@@ -27,6 +27,26 @@ popd
 echo Sync repo tree
 pushd aosptree
 repo sync --no-clone-bundle --no-tags -j$(nproc --all) -v
+
+# Source checkout is retained between CI runs. Projects removed from the manifest
+# may remain on disk, and Soong scans every Android.bp it finds.
+AOSP_TREE=$(realpath .)
+for stale_project in external/drm_hwcomposer device/amlogic/yukawa device/linaro/hikey
+do
+    stale_path=$(realpath -m "${AOSP_TREE}/${stale_project}")
+    case "${stale_path}" in
+        "${AOSP_TREE}"/*)
+            if [[ -e "${stale_path}" ]]; then
+                echo "Removing stale project excluded by the RPi manifest: ${stale_project}"
+                rm -rf -- "${stale_path}"
+            fi
+            ;;
+        *)
+            echo "Refusing to remove path outside AOSP tree: ${stale_path}" >&2
+            exit 1
+            ;;
+    esac
+done
 popd
 
 echo Patch AOSP tree

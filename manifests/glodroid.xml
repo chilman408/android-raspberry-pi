@@ -14,6 +14,10 @@
   <remove-project name="platform/external/v4l2_codec2" />
   <remove-project name="platform/external/wpa_supplicant_8" />
 
+  <!-- These reference AOSP's removed hwcomposer.drm_defaults and are not RPi targets. -->
+  <remove-project name="device/amlogic/yukawa" />
+  <remove-project name="device/linaro/hikey" />
+
   <project path="glodroid"                        remote="glodroid" name="glodroid_configuration.git" groups="glodroid" revision="refs/tags/basedir-v0.9.0" />
 
   <!-- gpu+display components (vendor) -->
