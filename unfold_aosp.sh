@@ -1,5 +1,12 @@
 
-#!/bin/bash -ex
+#!/bin/bash
+set -euo pipefail
+set -x
+
+export GIT_AUTHOR_NAME="Tesla Android CI"
+export GIT_AUTHOR_EMAIL="ci@teslaandroid.local"
+export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 
 LOCAL_PATH=$(pwd)
 
@@ -11,8 +18,10 @@ mv default.xml aosp.xml
 cp ${LOCAL_PATH}/manifests/tesla-android.xml tesla-android.xml
 cp ${LOCAL_PATH}/manifests/glodroid.xml glodroid.xml
 cp ${LOCAL_PATH}/manifests/default_aosp.xml default.xml
-git add *
-git commit -m "Add GloDroid Project" --no-edit
+git add --all
+if ! git diff --cached --quiet; then
+    git commit -m "Add GloDroid Project" --no-edit
+fi
 popd
 
 echo Sync repo tree
