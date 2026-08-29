@@ -6,8 +6,8 @@ Subject: [PATCH 6/6] WifiManager: Add WiFi spoofing
 Change-Id: I4efb3645f47182c4ee0707be9c15a6cb7118128d
 ---
  framework/java/android/net/wifi/FakeWifi.java | 183 ++++++++++++++++++
- .../java/android/net/wifi/WifiManager.java    |  15 +-
- 2 files changed, 197 insertions(+), 1 deletion(-)
+ .../java/android/net/wifi/WifiManager.java    |  12 ++
+ 2 files changed, 195 insertions(+)
  create mode 100644 framework/java/android/net/wifi/FakeWifi.java
 
 diff --git a/framework/java/android/net/wifi/FakeWifi.java b/framework/java/android/net/wifi/FakeWifi.java
@@ -203,15 +203,7 @@ diff --git a/framework/java/android/net/wifi/WifiManager.java b/framework/java/a
 index 3ed89ec..6e36956 100644
 --- a/framework/java/android/net/wifi/WifiManager.java
 +++ b/framework/java/android/net/wifi/WifiManager.java
-@@ -52,6 +52,7 @@ import android.net.Network;
- import android.net.NetworkCapabilities;
- import android.net.NetworkRequest;
- import android.net.NetworkStack;
-+import android.net.wifi.FakeWifi;
- import android.net.Uri;
- import android.net.wifi.hotspot2.IProvisioningCallback;
- import android.net.wifi.hotspot2.OsuProvider;
-@@ -4367,6 +4368,9 @@ public class WifiManager {
+@@ -4367,6 +4367,9 @@ public class WifiManager {
      @RequiresPermission(allOf = {ACCESS_WIFI_STATE, ACCESS_FINE_LOCATION}, conditional = true)
      public WifiInfo getConnectionInfo() {
          try {
@@ -221,7 +213,7 @@ index 3ed89ec..6e36956 100644
              return mService.getConnectionInfo(mContext.getOpPackageName(),
                      mContext.getAttributionTag());
          } catch (RemoteException e) {
-@@ -4976,6 +4980,9 @@ public class WifiManager {
+@@ -4976,6 +4979,9 @@ public class WifiManager {
       */
      @Deprecated
      public DhcpInfo getDhcpInfo() {
@@ -231,7 +223,7 @@ index 3ed89ec..6e36956 100644
          try {
              return mService.getDhcpInfo(mContext.getOpPackageName());
          } catch (RemoteException e) {
-@@ -5190,6 +5197,9 @@ public class WifiManager {
+@@ -5190,6 +5196,9 @@ public class WifiManager {
       * @see #isWifiEnabled()
       */
      public int getWifiState() {
@@ -241,7 +233,7 @@ index 3ed89ec..6e36956 100644
          try {
              return mService.getWifiEnabledState();
          } catch (RemoteException e) {
-@@ -5203,6 +5213,9 @@ public class WifiManager {
+@@ -5203,6 +5212,9 @@ public class WifiManager {
       * @see #getWifiState()
       */
      public boolean isWifiEnabled() {
@@ -251,13 +243,6 @@ index 3ed89ec..6e36956 100644
          return getWifiState() == WIFI_STATE_ENABLED;
      }
  
-@@ -11798,4 +11811,4 @@ public class WifiManager {
-             throw e.rethrowFromSystemServer();
-         }
-     }
--}
-\ No newline at end of file
-+}
 -- 
 2.34.1
 
