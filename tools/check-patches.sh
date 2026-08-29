@@ -67,24 +67,17 @@ popd >/dev/null
 
 for patch_dir in "${patch_dirs[@]}"; do
   printf '\nApplying %s\n' "$patch_dir"
-  series=("$source_root/patches-aosp/$patch_dir"/*.patch)
-  if git -C "$tree_root/$patch_dir" am "${series[@]}"; then
-    continue
-  fi
+  for patch in "$source_root/patches-aosp/$patch_dir"/*.patch; do
+    if git -C "$tree_root/$patch_dir" am "$patch"; then
+      continue
+    fi
 
-  printf '\nPatch series failed. Attempting a diagnostic three-way rebase.\n' >&2
-  git -C "$tree_root/$patch_dir" am --abort
-  git -C "$tree_root/$patch_dir" fetch --depth=1 origin \
-    refs/tags/android-14.0.0_r22:refs/tags/android-14.0.0_r22 || true
-
-  if git -C "$tree_root/$patch_dir" am --3way "${series[@]}"; then
-    printf '\n--- BEGIN AUTO-REBASED PATCH ---\n' >&2
-    git -C "$tree_root/$patch_dir" format-patch -1 --stdout >&2
-    printf '%s\n' '--- END AUTO-REBASED PATCH ---' >&2
-  else
-    git -C "$tree_root/$patch_dir" status --short >&2 || true
-  fi
-  exit 1
+    printf '\nPatch failed: %s\n' "$patch" >&2
+    git -C "$tree_root/$patch_dir" am --abort
+    git -C "$tree_root/$patch_dir" apply --reject --whitespace=nowarn "$patch" || true
+    find "$tree_root/$patch_dir" -type f -name '*.rej' -print -exec sed -n '1,240p' {} \; >&2
+    exit 1
+  done
 done
 
 printf '\nAll Android 15 patch series applied cleanly.\n'
