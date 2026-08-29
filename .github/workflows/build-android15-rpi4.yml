@@ -70,8 +70,8 @@ jobs:
           sudo apt-get install --yes \
             bc bison build-essential ccache cpio curl device-tree-compiler dosfstools \
             flex fontconfig g++-multilib gcc-multilib gdisk gettext git-core git-lfs \
-            gnupg lib32ncurses5-dev lib32z1-dev libc6-dev-i386 libglib2.0-dev \
-            libgl1-mesa-dev libgmp-dev libgnutls28-dev libmpc-dev libncurses5 \
+            gnupg lib32ncurses-dev lib32z1-dev libc6-dev-i386 libglib2.0-dev \
+            libgl1-mesa-dev libgmp-dev libgnutls28-dev libmpc-dev libncurses-dev \
             libssl-dev libxml2-utils libx11-dev lz4 meson mtools ninja-build \
             pkg-config python-is-python3 python3-dev python3-jinja2 python3-mako \
             python3-ply python3-pyelftools python3-yaml rsync swig unzip wget \
