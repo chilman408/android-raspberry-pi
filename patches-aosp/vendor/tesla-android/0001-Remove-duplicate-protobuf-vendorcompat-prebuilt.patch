@@ -1,0 +1,44 @@
+From 6f7d9e16de8fb7281b5cc3d9b5ac30ad27c80657 Mon Sep 17 00:00:00 2001
+From: Hilman <44660877+chilman408@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 01:50:00 -0700
+Subject: [PATCH] Remove duplicate protobuf vendorcompat prebuilt
+
+Android 15 provides the maintained protobuf vendor compatibility prebuilts
+from prebuilts/misc. Keeping the legacy Tesla Android copy defines the same
+Soong module twice and prevents bootstrap.
+
+---
+ services/protobuf_vendorcompat/Android.bp | 22 ----------------------
+ 1 file changed, 22 deletions(-)
+ delete mode 100644 services/protobuf_vendorcompat/Android.bp
+
+diff --git a/services/protobuf_vendorcompat/Android.bp b/services/protobuf_vendorcompat/Android.bp
+deleted file mode 100644
+index 34e1fa6..0000000
+--- a/services/protobuf_vendorcompat/Android.bp
++++ /dev/null
+@@ -1,22 +0,0 @@
+-cc_prebuilt_library_shared {
+-    name: "libprotobuf-cpp-lite-3.9.1-vendorcompat",
+-    stem: "libprotobuf-cpp-lite-3.9.1",
+-    vendor: true,
+-    target: {
+-        android_arm64: {
+-            srcs: ["arm64/libprotobuf-cpp-lite-3.9.1.so"],
+-        },
+-        android_arm: {
+-            srcs: ["arm/libprotobuf-cpp-lite-3.9.1.so"],
+-        },
+-    },
+-
+-    shared_libs: [
+-        "libc++",
+-        "libc",
+-        "libdl",
+-        "liblog",
+-        "libm",
+-        "libz",
+-    ],
+-}
+-- 
+2.43.0

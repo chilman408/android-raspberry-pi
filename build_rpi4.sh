@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/bin/bash
+set -euo pipefail
 
 trap 'echo -e "\nbuild.sh interrupted"; exit 1' SIGINT
 

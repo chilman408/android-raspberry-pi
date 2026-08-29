@@ -10,6 +10,7 @@
   <remote  name="videolan"   fetch="https://code.videolan.org/videolan" />
 
   <remove-project name="platform/external/mesa3d" />
+  <remove-project name="platform/external/drm_hwcomposer" />
   <remove-project name="platform/external/v4l2_codec2" />
   <remove-project name="platform/external/wpa_supplicant_8" />
 
