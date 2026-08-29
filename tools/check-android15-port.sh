@@ -63,7 +63,7 @@ reject_match "unfold_aosp.sh" 'android-platform-14\.' \
   "An Android 14 platform pin remains in the active build script"
 
 if grep -REn '^(<<<<<<< |=======$|>>>>>>> )' \
-    --exclude-dir=.git --exclude='*.md' .; then
+    --exclude-dir=.git --exclude-dir=aosptree --exclude-dir=artifacts --exclude='*.md' .; then
   fail "Unresolved Git merge markers remain in active source or patch files"
 fi
 
