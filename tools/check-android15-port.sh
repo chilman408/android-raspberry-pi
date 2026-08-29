@@ -62,6 +62,36 @@ reject_match "manifests/tesla-android.xml" 'revision="lineage-20\.0"' \
 reject_match "unfold_aosp.sh" 'android-platform-14\.' \
   "An Android 14 platform pin remains in the active build script"
 
+if grep -REn '^(<<<<<<< |=======$|>>>>>>> )' \
+    --exclude-dir=.git --exclude='*.md' .; then
+  fail "Unresolved Git merge markers remain in active source or patch files"
+fi
+
+python3 - <<'PY' || failures=$((failures + 1))
+import collections
+import pathlib
+import re
+
+for directory in sorted(pathlib.Path("patches-aosp").rglob("*")):
+    if not directory.is_dir():
+        continue
+    prefixes = collections.defaultdict(list)
+    for patch in directory.glob("*.patch"):
+        match = re.match(r"(\\d{4})-", patch.name)
+        if match:
+            prefixes[match.group(1)].append(patch.name)
+    duplicates = {key: names for key, names in prefixes.items() if len(names) > 1}
+    if duplicates:
+        for key, names in duplicates.items():
+            print(
+                f"ERROR: duplicate patch sequence {key} in {directory}: "
+                + ", ".join(sorted(names))
+            )
+        raise SystemExit(1)
+
+print("Patch sequence prefixes are unique.")
+PY
+
 python3 - <<'PY' || failures=$((failures + 1))
 import pathlib
 import xml.etree.ElementTree as ET
