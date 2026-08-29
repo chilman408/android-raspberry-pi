@@ -29,7 +29,7 @@ git add --all
 git commit -m "Add Tesla Android and GloDroid manifests" --no-edit
 popd >/dev/null
 
-mapfile -t manifest_projects < <("$repo_bin" list -p | sort -u)
+mapfile -t manifest_projects < <("$repo_bin" list --all -p | sort -u)
 popd >/dev/null
 
 mapfile -t patch_dirs < <(
