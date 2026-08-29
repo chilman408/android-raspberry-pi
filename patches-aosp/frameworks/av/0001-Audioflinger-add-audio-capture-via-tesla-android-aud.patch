@@ -1,37 +1,69 @@
-From 56f1d61d5d756ea09d7ad7f6c9fae8b51e4080c1 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Micha=C5=82=20Gapi=C5=84ski?= <mike@gapinski.eu>
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Michal Gapinski <mike@gapinski.eu>
 Date: Fri, 5 Sep 2025 20:24:53 +0000
-Subject: [PATCH] Audioflinger: add audio capture via tesla-android-audio-relay
+Subject: [PATCH] AudioFlinger: add audio capture via tesla-android-audio-relay
+
+Rebased for the Android 15 AudioFlinger thread layout.
 
 Change-Id: I58955528b2b4b5210a7f190bf79f5201276e227a
 ---
- services/audioflinger/Threads.cpp | 75 ++++++++++++++++++++++++++++++-
+ services/audioflinger/Threads.cpp | 73 +++++++++++++++++++++++++++++++++
  services/audioflinger/Threads.h   |  4 ++
- 2 files changed, 78 insertions(+), 1 deletion(-)
+ 2 files changed, 77 insertions(+)
 
 diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
-index 700bdd2..781c9cf 100644
 --- a/services/audioflinger/Threads.cpp
 +++ b/services/audioflinger/Threads.cpp
-@@ -96,6 +96,13 @@
- #include <pthread.h>
- #include "TypedLogger.h"
+@@ -89,15 +89,22 @@
+ #include <utils/Log.h>
+ #include <utils/Trace.h>
  
+-#include <fcntl.h>
+-#include <linux/futex.h>
+-#include <math.h>
+-#include <memory>
+-#include <pthread.h>
+-#include <sstream>
+-#include <string>
+-#include <sys/stat.h>
+-#include <sys/syscall.h>
++#include <arpa/inet.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <linux/futex.h>
++#include <math.h>
++#include <memory>
++#include <pthread.h>
++#include <stdint.h>
++#include <sstream>
++#include <string>
++#include <string.h>
 +#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/syscall.h>
 +#include <sys/un.h>
 +#include <unistd.h>
-+#include <arpa/inet.h>
-+#include <stdint.h>
-+#include <string.h> 
-+
+ 
  // ----------------------------------------------------------------------------
  
- // Note: the following macro is used for extremely verbose logging message.  In
-@@ -3421,6 +3428,72 @@ void AudioFlinger::PlaybackThread::checkSilentMode_l()
-     }
- }
- 
-+void AudioFlinger::PlaybackThread::openWsSocket() {
+@@ -3573,13 +3580,64 @@
+                 ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
+                 // The setprop command will not allow a property to be changed after
+                 // the first time it is set, so we don't have to worry about un-muting.
+-                setMasterMute_l(true);
+-            }
+-        }
+-    }
+-}
+-
+-// shared by MIXER and DIRECT, overridden by DUPLICATING
++                setMasterMute_l(true);
++            }
++        }
++    }
++}
++
++void PlaybackThread::openWsSocket() {
 +    if (mWsFd >= 0) return;
 +
 +    mWsFd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -40,12 +72,11 @@ index 700bdd2..781c9cf 100644
 +        return;
 +    }
 +
-+    struct sockaddr_un addr;
-+    memset(&addr, 0, sizeof(addr));
++    struct sockaddr_un addr = {};
 +    addr.sun_family = AF_UNIX;
 +    strncpy(addr.sun_path, "/dev/socket/ws_audio", sizeof(addr.sun_path) - 1);
 +
-+    if (connect(mWsFd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
++    if (connect(mWsFd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
 +        ALOGW("openWsSocket: connect() failed: %s", strerror(errno));
 +        close(mWsFd);
 +        mWsFd = -1;
@@ -55,78 +86,73 @@ index 700bdd2..781c9cf 100644
 +    ALOGI("openWsSocket: connected to /dev/socket/ws_audio (fd=%d)", mWsFd);
 +}
 +
-+static bool write_all(int fd, const void* buf, size_t count) {
-+    const uint8_t* p = (const uint8_t*)buf;
-+    size_t left = count;
-+    while (left > 0) {
-+        ssize_t w = TEMP_FAILURE_RETRY(write(fd, p, left));
-+        if (w < 0) {
++static bool writeAll(int fd, const void* buffer, size_t count) {
++    const auto* data = static_cast<const uint8_t*>(buffer);
++    size_t remaining = count;
++    while (remaining > 0) {
++        const ssize_t written = TEMP_FAILURE_RETRY(write(fd, data, remaining));
++        if (written <= 0) {
 +            return false;
 +        }
-+        p += w;
-+        left -= (size_t)w;
++        data += written;
++        remaining -= static_cast<size_t>(written);
 +    }
 +    return true;
 +}
 +
-+void AudioFlinger::PlaybackThread::sendToWsServer(const void* data, size_t bytes) {
++void PlaybackThread::sendToWsServer(const void* data, size_t bytes) {
 +    if (bytes == 0) return;
 +    if (mWsFd < 0) openWsSocket();
 +    if (mWsFd < 0) return;
 +
-+    uint32_t len = htonl((uint32_t)bytes);
-+
-+    if (!write_all(mWsFd, &len, sizeof(len))) {
-+        ALOGW("sendToWsServer: failed to write length: %s", strerror(errno));
++    const uint32_t length = htonl(static_cast<uint32_t>(bytes));
++    if (!writeAll(mWsFd, &length, sizeof(length)) ||
++            !writeAll(mWsFd, data, bytes)) {
++        ALOGW("sendToWsServer: write failed: %s", strerror(errno));
 +        close(mWsFd);
 +        mWsFd = -1;
-+        return;
-+    }
-+
-+    if (!write_all(mWsFd, data, bytes)) {
-+        ALOGW("sendToWsServer: failed to write payload: %s", strerror(errno));
-+        close(mWsFd);
-+        mWsFd = -1;
-+        return;
-+    }
-+
-+    // Optional: throttle debug logs to avoid spam
-+    static int counter = 0;
-+    if ((counter++ & 127) == 0) {
-+        ALOGV("sendToWsServer: sent %zu bytes", bytes);
 +    }
 +}
 +
- // shared by MIXER and DIRECT, overridden by DUPLICATING
- ssize_t AudioFlinger::PlaybackThread::threadLoop_write()
++// shared by MIXER and DIRECT, overridden by DUPLICATING
+ ssize_t PlaybackThread::threadLoop_write()
  {
-@@ -3450,10 +3523,10 @@ ssize_t AudioFlinger::PlaybackThread::threadLoop_write()
- 
+     LOG_HIST_TS();
+@@ -3609,10 +3667,11 @@
          if (framesWritten > 0) {
              bytesWritten = framesWritten * mFrameSize;
--
- #ifdef TEE_SINK
-             mTee.write((char *)mSinkBuffer + offset, framesWritten);
- #endif
+ 
+-#ifdef TEE_SINK
+-            mTee.write((char *)mSinkBuffer + offset, framesWritten);
+-#endif
+-        } else {
++#ifdef TEE_SINK
++            mTee.write((char *)mSinkBuffer + offset, framesWritten);
++#endif
 +            sendToWsServer((char *)mSinkBuffer + offset, bytesWritten);
-         } else {
++        } else {
              bytesWritten = framesWritten;
          }
+     // otherwise use the HAL / AudioStreamOut directly
 diff --git a/services/audioflinger/Threads.h b/services/audioflinger/Threads.h
-index e88134b..21c41d3 100644
 --- a/services/audioflinger/Threads.h
 +++ b/services/audioflinger/Threads.h
-@@ -1257,6 +1257,10 @@ private:
+@@ -1351,9 +1351,13 @@
+                                     || mType == OFFLOAD)
+                             ? mTimestampVerifier.DISCONTINUITY_MODE_ZERO
                              : mTimestampVerifier.DISCONTINUITY_MODE_CONTINUOUS;
-                 }
- 
-+    int mWsFd = -1;
-+    void openWsSocket();
-+    void sendToWsServer(const void* data, size_t bytes);
+-                }
+-
+-    ActiveTracks<IAfTrack> mActiveTracks;
++                }
 +
- protected:
-     ActiveTracks<Track>     mActiveTracks;
++    int mWsFd = -1;
++    void openWsSocket() REQUIRES(ThreadBase_ThreadLoop);
++    void sendToWsServer(const void* data, size_t bytes) REQUIRES(ThreadBase_ThreadLoop);
++
++    ActiveTracks<IAfTrack> mActiveTracks;
  
+     // Time to sleep between cycles when:
+     virtual uint32_t        activeSleepTimeUs() const;      // mixer state MIXER_TRACKS_ENABLED
 -- 
-2.34.1
-
+2.43.0
