@@ -1,0 +1,23 @@
+name: Android 15 port validation
+
+on:
+  push:
+    branches:
+      - android-15-bringup
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Validate Android 15 BSP baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate manifests and BSP migration
+        run: bash tools/check-android15-port.sh
