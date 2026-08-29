@@ -20,6 +20,6 @@
   <project path="external/tesla-android-audio-relay" remote="tesla-android" name="android-external-tesla-android-audio-relay.git" revision="717d0a8eec5d7b305f2f98b806b438a4dcebfe6f" />
   <project path="vendor/tesla-android" remote="tesla-android" name="android-vendor-tesla-android.git" revision="db065eb2117ccf86933c02c7fa86fa2818f9352e" />
   <project path="packages/apps/Updater" remote="tesla-android" name="android-packages-apps-updater.git" revision="184eb00ce0add9b5ed0c22e5c8167ff5d0b596c8" />
-  <project path="packages/apps/Jelly" remote="github" name="LineageOS/android_packages_apps_Jelly" revision="lineage-20.0"/>
-  <project path="vendor/gapps" remote="gapps-gitlab" name="vendor_gapps.git" revision="tau"/>
+  <project path="packages/apps/Jelly" remote="github" name="LineageOS/android_packages_apps_Jelly" revision="35a5f08408499b2b9edecbebcc00a6320f831d8f"/>
+  <project path="vendor/gapps" remote="gapps-gitlab" name="vendor_gapps.git" revision="vic"/>
 </manifest>
