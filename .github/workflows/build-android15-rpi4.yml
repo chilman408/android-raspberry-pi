@@ -51,12 +51,19 @@ jobs:
           set -euo pipefail
           free_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
           memory_kib="$(awk '/^(MemTotal|SwapTotal):/ {total += $2} END {print total}' /proc/meminfo)"
-          required_disk_kib=$((300 * 1024 * 1024))
+          if [[ -d "$GITHUB_WORKSPACE/aosptree/out" ]]; then
+            required_disk_kib=$((150 * 1024 * 1024))
+            disk_mode="cached incremental build"
+          else
+            required_disk_kib=$((300 * 1024 * 1024))
+            disk_mode="fresh Android checkout"
+          fi
           required_memory_kib=$((40 * 1024 * 1024))
           echo "Free workspace disk: $((free_kib / 1024 / 1024)) GiB"
+          echo "Required workspace disk for $disk_mode: $((required_disk_kib / 1024 / 1024)) GiB"
           echo "RAM plus swap: $((memory_kib / 1024 / 1024)) GiB"
           if (( free_kib < required_disk_kib )); then
-            echo "ERROR: Android build requires at least 300 GiB of free workspace disk." >&2
+            echo "ERROR: $disk_mode requires at least $((required_disk_kib / 1024 / 1024)) GiB of free workspace disk." >&2
             exit 1
           fi
           if (( memory_kib < required_memory_kib )); then
