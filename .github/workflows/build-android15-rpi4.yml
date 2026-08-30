@@ -115,7 +115,8 @@ jobs:
           rm -rf -- \
             "$product_obj/AOSPEXT/FFMPEG" \
             "$product_obj/AOSPEXT/LIBCAMERA" \
-            "$product_obj/GLODROID/KERNEL"
+            "$product_obj/GLODROID/KERNEL" \
+            "$product_obj/UBOOT_OBJ"
 
       - name: Build Raspberry Pi 4 image
         run: bash build_rpi4.sh

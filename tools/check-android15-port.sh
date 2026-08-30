@@ -50,6 +50,9 @@ require_file "patches-aosp/glodroid/configuration/0011-bootscript-Account-for-ab
   "The boot script must use the current U-Boot A/B selection command"
 require_file "patches-aosp/glodroid/bootloader/u-boot/0002-abootcmd-Add-load-subcommand.patch" \
   "U-Boot must load Android 15 boot, init_boot, and vendor_boot images"
+require_match ".github/workflows/build-android15-rpi4.yml" \
+  '"\\$product_obj/UBOOT_OBJ"' \
+  "The build must discard stale U-Boot intermediates after bootloader revision changes"
 
 require_file "patches-aosp/glodroid/configuration/0006-graphics-drm_hwcomposer-Transition-from-HWC2-to-HWC3.patch" \
   "Android 15 requires the HWC3 transition"
