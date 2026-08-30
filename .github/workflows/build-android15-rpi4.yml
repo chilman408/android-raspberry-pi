@@ -130,13 +130,19 @@ jobs:
           short_sha="${GITHUB_SHA:0:12}"
           prefix="TeslaAndroid-15-rpi4-$short_sha"
 
-          sdcard="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name sdcard.img -print -quit)"
-          images="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name images.tar.gz -print -quit)"
-          ota="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name '*-ota-*.zip' -print -quit)"
+          product_out="$GITHUB_WORKSPACE/aosptree/out/target/product/gd_rpi4"
+          sdcard="$product_out/sdcard.img"
+          images="$product_out/images.tar.gz"
+          ota="$(find "$product_out" -maxdepth 1 -type f -name '*-ota.zip' -print -quit)"
 
-          [[ -n "$sdcard" ]] || { echo "ERROR: sdcard.img was not produced" >&2; exit 1; }
-          [[ -n "$images" ]] || { echo "ERROR: images.tar.gz was not produced" >&2; exit 1; }
-          [[ -n "$ota" ]] || { echo "ERROR: OTA package was not produced" >&2; exit 1; }
+          if [[ ! -f "$sdcard" || ! -f "$images" || -z "$ota" ]]; then
+            echo "ERROR: one or more expected build artifacts were not produced in $product_out" >&2
+            ls -lah "$product_out" >&2
+            [[ -f "$sdcard" ]] || echo "Missing: sdcard.img" >&2
+            [[ -f "$images" ]] || echo "Missing: images.tar.gz" >&2
+            [[ -n "$ota" ]] || echo "Missing: *-ota.zip" >&2
+            exit 1
+          fi
 
           zstd -T0 -19 "$sdcard" -o "$artifact_root/$prefix-flashable.img.zst"
           cp "$images" "$artifact_root/$prefix-fastboot-images.tar.gz"
