@@ -1,13 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Hilman <hilman@users.noreply.github.com>
 Date: Sat, 30 Aug 2026 01:03:00 -0700
-Subject: [PATCH] ipc: remove unused imp import for Python 3.12
+Subject: [PATCH] ipc: remove unused imp imports for Python 3.12
 
-Python 3.12 removed the deprecated imp module. The bundled Mojo file utility
-does not use it, so drop the import.
+Python 3.12 removed the deprecated imp module. The bundled Mojo file
+utility and lexer do not use it, so drop both imports.
 ---
- utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py | 1 -
- 1 file changed, 1 deletion(-)
+ utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py    | 1 -
+ utils/ipc/mojo/public/tools/mojom/mojom/parse/lexer.py | 1 -
+ 2 files changed, 2 deletions(-)
 
 diff --git a/utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py b/utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py
 index bf626f5..bbbbbbb 100644
@@ -17,6 +18,18 @@ index bf626f5..bbbbbbb 100644
  # found in the LICENSE file.
  
  import errno
+-import imp
+ import os.path
+ import sys
+ 
+diff --git a/utils/ipc/mojo/public/tools/mojom/mojom/parse/lexer.py b/utils/ipc/mojo/public/tools/mojom/mojom/parse/lexer.py
+index 3e084bb..ccccccc 100644
+--- a/utils/ipc/mojo/public/tools/mojom/mojom/parse/lexer.py
++++ b/utils/ipc/mojo/public/tools/mojom/mojom/parse/lexer.py
+@@ -2,7 +2,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
 -import imp
  import os.path
  import sys
