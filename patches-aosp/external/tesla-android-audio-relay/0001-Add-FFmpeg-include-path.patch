@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 10:04:00 -0700
+Subject: [PATCH] audio-relay: include FFmpeg source headers
+
+---
+ Android.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.mk b/Android.mk
+index 83a5944..6666666 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -9,6 +9,7 @@ LOCAL_SRC_FILES := \
+     ta_audio_mux.c
+ 
+ LOCAL_CFLAGS += -D__STDC_FORMAT_MACROS -Wno-deprecated-declarations
++LOCAL_C_INCLUDES += $(ANDROID_BUILD_TOP)/glodroid/vendor/ffmpeg
+ LOCAL_LDLIBS +=
+ LOCAL_SHARED_LIBRARIES := \
+     libcutils \
+-- 
+2.43.0

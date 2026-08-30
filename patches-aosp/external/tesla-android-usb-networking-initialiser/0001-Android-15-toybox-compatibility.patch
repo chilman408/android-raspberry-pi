@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 10:00:00 -0700
+Subject: [PATCH] usb-networking: update vendored toybox declarations for Android 15
+
+---
+ toybox/lib.c   | 6 +++---
+ toybox/xwrap.c | 2 ++
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/toybox/lib.c b/toybox/lib.c
+index c9207a9..1111111 100644
+--- a/toybox/lib.c
++++ b/toybox/lib.c
+@@ -668,7 +668,7 @@ int highest_bit(unsigned long l)
+ }
+ 
+ // Inefficient, but deals with unaligned access
+-int64_t peek_le(void *ptr, unsigned size)
++long long peek_le(void *ptr, unsigned size)
+ {
+   int64_t ret = 0;
+   char *c = ptr;
+@@ -779,7 +779,7 @@ int64_t peek_le(void *ptr, unsigned size)
+   return ret;
+ }
+ 
+-int64_t peek_be(void *ptr, unsigned size)
++long long peek_be(void *ptr, unsigned size)
+ {
+   int64_t ret = 0;
+   char *c = ptr;
+@@ -789,7 +789,7 @@ int64_t peek_be(void *ptr, unsigned size)
+   return ret;
+ }
+ 
+-int64_t peek(void *ptr, unsigned size)
++long long peek(void *ptr, unsigned size)
+ {
+   return (IS_BIG_ENDIAN ? peek_be : peek_le)(ptr, size);
+ }
+diff --git a/toybox/xwrap.c b/toybox/xwrap.c
+index 5ea47d4..2222222 100644
+--- a/toybox/xwrap.c
++++ b/toybox/xwrap.c
+@@ -8,6 +8,8 @@
+ 
+ #include "toys.h"
+ 
++void xflush(int flush);
++
+ // strcpy and strncat with size checking. Size is the total space in "dest",
+ // including null terminator. Exit if there's not enough space for the string
+ // (including space for the null terminator), because silently truncating is
+-- 
+2.43.0

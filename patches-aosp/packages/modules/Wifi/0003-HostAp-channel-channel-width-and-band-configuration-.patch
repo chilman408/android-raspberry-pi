@@ -12,7 +12,7 @@ Signed-off-by: Michał Gapiński <mike@gapinski.eu>
 ---
  .../android/net/wifi/SoftApConfiguration.java |  9 +--
  .../net/wifi/SoftApConfiguration.java.rej     | 10 ---
- .../wifi/TeslaAndroidSoftApConfiguration.java | 64 +++++++++++++++++++
+ .../wifi/TeslaAndroidSoftApConfiguration.java | 65 ++++++++++++++++++++
  .../android/server/wifi/SoftApManager.java    | 22 -------
  .../server/wifi/WifiApConfigStore.java        | 10 +--
  .../com/android/server/wifi/WifiNative.java   |  6 +-
@@ -85,7 +85,7 @@ new file mode 100644
 index 0000000..ec7dd94
 --- /dev/null
 +++ b/framework/java/android/net/wifi/TeslaAndroidSoftApConfiguration.java
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,65 @@
 +/*
 + * Copyright (C) 2023 The Tesla Android Project
 + *
@@ -118,6 +118,7 @@ index 0000000..ec7dd94
 +/**
 + * Provide utility functions used to fetch Tesla Android SoftAp configuration.
 + */
++/** @hide */
 +public class TeslaAndroidSoftApConfiguration {
 +    private static final String TAG = "TeslaAndroidSoftApConfiguration";
 +

@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 10:02:00 -0700
+Subject: [PATCH] SurfaceFlinger: allow Tesla permission helper to be unused
+
+The secure-layer capture patch bypasses every call to this helper. Android 15
+builds SurfaceFlinger with unused-function warnings as errors.
+
+---
+ services/surfaceflinger/SurfaceFlinger.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index 71f9b00..4444444 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -591,7 +591,7 @@ bool callingThreadHasUnscopedSurfaceFlingerAccess(bool usePermissionCache) {
+     return true;
+ }
+ 
+-static bool hasCaptureBlackoutContentPermission() {
++[[maybe_unused]] static bool hasCaptureBlackoutContentPermission() {
+     IPCThreadState* ipc = IPCThreadState::self();
+     const uid_t uid = ipc->getCallingUid();
+     if (uid == AID_GRAPHICS || uid == AID_SYSTEM) {
+-- 
+2.43.0

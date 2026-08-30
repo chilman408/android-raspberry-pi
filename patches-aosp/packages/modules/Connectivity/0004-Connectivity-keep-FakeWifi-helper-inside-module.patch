@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tesla Android CI <ci@teslaandroid.local>
+Date: Sat, 30 Aug 2026 02:00:00 +0000
+Subject: [PATCH 4/4] Connectivity: keep FakeWifi helper inside module
+
+Android 15 only exposes approved Wi-Fi APIs to the Connectivity module.
+Keep the compatibility helper local to Connectivity instead of depending
+on a hidden class from framework-wifi.
+---
+ framework/src/android/net/ConnectivityManager.java |  1 -
+ framework/src/android/net/FakeWifi.java             | 63 +++++++++++++++++++++
+ 2 files changed, 63 insertions(+), 1 deletion(-)
+ create mode 100644 framework/src/android/net/FakeWifi.java
+
+diff --git a/framework/src/android/net/ConnectivityManager.java b/framework/src/android/net/ConnectivityManager.java
+index 3d20c3d..0000000 100644
+--- a/framework/src/android/net/ConnectivityManager.java
++++ b/framework/src/android/net/ConnectivityManager.java
+@@ -50,7 +50,6 @@ import android.net.TetheringManager.StartTetheringCallback;
+ import android.net.TetheringManager.TetheringEventCallback;
+ import android.net.TetheringManager.TetheringRequest;
+-import android.net.wifi.FakeWifi;
+ import android.os.Binder;
+ import android.os.Build;
+ import android.os.Build.VERSION_CODES;
+diff --git a/framework/src/android/net/FakeWifi.java b/framework/src/android/net/FakeWifi.java
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/framework/src/android/net/FakeWifi.java
+@@ -0,0 +1,63 @@
++/*
++ * Copyright (C) 2026 The Tesla Android Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package android.net;
++
++import android.content.Context;
++import android.os.PatternMatcher;
++import android.os.SystemProperties;
++import android.util.Log;
++
++import java.lang.reflect.Field;
++import java.util.Arrays;
++
++/**
++ * Connectivity-module side of the Wi-Fi compatibility shim.
++ *
++ * This stays package-private so it does not become part of Android's API surface.
++ */
++final class FakeWifi {
++    private static final String LOG_TAG = "FakeWifi";
++
++    private FakeWifi() {}
++
++    static boolean isHackEnabled(Context context) {
++        String packageName = context.getOpPackageName();
++        boolean enabled = Arrays.stream(
++                        SystemProperties.get("persist.waydroid.fake_wifi").split(","))
++                .map(value -> value.replace(".", "\\."))
++                .map(value -> value.replace("*", ".*"))
++                .map(value -> new PatternMatcher(value, PatternMatcher.PATTERN_SIMPLE_GLOB))
++                .anyMatch(pattern -> pattern.match(packageName));
++
++        if (enabled) {
++            Log.d(LOG_TAG, "Faking wifi for " + packageName);
++        }
++        return enabled;
++    }
++
++    static NetworkInfo getFakeNetworkInfo() {
++        NetworkInfo networkInfo =
++                new NetworkInfo(ConnectivityManager.TYPE_WIFI, 0, "WIFI", null);
++        networkInfo.setDetailedState(NetworkInfo.DetailedState.CONNECTED, null, null);
++        try {
++            Field isAvailable = networkInfo.getClass().getDeclaredField("mIsAvailable");
++            isAvailable.setAccessible(true);
++            isAvailable.setBoolean(networkInfo, true);
++        } catch (ReflectiveOperationException e) {
++            Log.w(LOG_TAG, "Unable to mark fake Wi-Fi network available", e);
++        }
++        return networkInfo;
++    }
++
++    static NetworkInfo maybeOverwrite(NetworkInfo network) {
++        if (network == null
++                || network.getType() != ConnectivityManager.TYPE_WIFI
++                || !network.isConnected()) {
++            return getFakeNetworkInfo();
++        }
++        return network;
++    }
++}
+-- 
+2.34.1

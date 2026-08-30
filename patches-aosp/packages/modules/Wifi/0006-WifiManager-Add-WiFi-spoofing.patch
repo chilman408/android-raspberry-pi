@@ -5,9 +5,9 @@ Subject: [PATCH 6/6] WifiManager: Add WiFi spoofing
 
 Change-Id: I4efb3645f47182c4ee0707be9c15a6cb7118128d
 ---
- framework/java/android/net/wifi/FakeWifi.java | 192 ++++++++++++++++++
+ framework/java/android/net/wifi/FakeWifi.java | 184 ++++++++++++++++++
  .../java/android/net/wifi/WifiManager.java    |  12 ++
- 2 files changed, 204 insertions(+)
+ 2 files changed, 196 insertions(+)
  create mode 100644 framework/java/android/net/wifi/FakeWifi.java
 
 diff --git a/framework/java/android/net/wifi/FakeWifi.java b/framework/java/android/net/wifi/FakeWifi.java
@@ -15,7 +15,7 @@ new file mode 100644
 index 0000000..cf194a0
 --- /dev/null
 +++ b/framework/java/android/net/wifi/FakeWifi.java
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,184 @@
 +package android.net.wifi;
 +
 +import android.content.Context;
@@ -39,17 +39,13 @@ index 0000000..cf194a0
 +import android.annotation.NonNull;
 +import android.annotation.Nullable;
 +import android.annotation.SuppressLint;
-+import android.annotation.SystemApi;
 +
 +/** @hide */
-+@SystemApi(client = SystemApi.Client.MODULE_LIBRARIES)
 +public final class FakeWifi {
 +    private static final String LOG_TAG = "FakeWifi";
 +
 +    private FakeWifi() {}
 +
-+    /** @hide */
-+    @SystemApi(client = SystemApi.Client.MODULE_LIBRARIES)
 +    public static boolean isHackEnabled(@NonNull Context context) {
 +        String packageName = context.getOpPackageName();
 +        boolean enabled = Arrays.stream(SystemProperties.get("persist.waydroid.fake_wifi").split(","))
@@ -65,8 +61,6 @@ index 0000000..cf194a0
 +    }
 +
 +    @NonNull
-+    /** @hide */
-+    @SystemApi(client = SystemApi.Client.MODULE_LIBRARIES)
 +    public static NetworkInfo getFakeNetworkInfo()
 +    {
 +        NetworkInfo info = createNetworkInfo(ConnectivityManager.TYPE_WIFI, true);
@@ -200,8 +194,6 @@ index 0000000..cf194a0
 +    }
 +
 +    @Nullable
-+    /** @hide */
-+    @SystemApi(client = SystemApi.Client.MODULE_LIBRARIES)
 +    public static NetworkInfo maybeOverwrite(@Nullable NetworkInfo network) {
 +        if (network == null || network.getType() != ConnectivityManager.TYPE_WIFI || !network.isConnected())
 +            network = getFakeNetworkInfo();

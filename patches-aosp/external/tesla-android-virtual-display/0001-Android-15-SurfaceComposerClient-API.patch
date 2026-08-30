@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 10:01:00 -0700
+Subject: [PATCH] virtual-display: migrate SurfaceComposerClient APIs to Android 15
+
+---
+ capture/minicap_impl.hpp | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/capture/minicap_impl.hpp b/capture/minicap_impl.hpp
+index b49b0c6..3333333 100644
+--- a/capture/minicap_impl.hpp
++++ b/capture/minicap_impl.hpp
+@@ -260,10 +260,7 @@ public:
+ 
+     // Create virtual display.
+     printf("Creating virtual display \n");
+-    mVirtualDisplay = android::SurfaceComposerClient::createDisplay(
+-      /* const String8& displayName */  android::String8("minicap"),
+-      /* bool secure */                 true
+-    );
++    mVirtualDisplay = android::SurfaceComposerClient::createVirtualDisplay("minicap", true);
+ 
+     printf("Creating buffer queue \n");
+     android::BufferQueue::createBufferQueue(&mBufferProducer, &mBufferConsumer, false);
+@@ -296,7 +293,7 @@ public:
+   void
+   destroyVirtualDisplay() {
+     printf("Destroying virtual display \n");
+-    android::SurfaceComposerClient::destroyDisplay(mVirtualDisplay);
++    android::SurfaceComposerClient::destroyVirtualDisplay(mVirtualDisplay);
+ 
+     if (mHaveBuffer) {
+       mConsumer->releaseBuffer(mBuffer);
+@@ -382,7 +379,7 @@ int minicap_try_get_display_info(int32_t displayId, Minicap::DisplayInfo* info) {
+   info->width = viewport.getWidth();
+   info->height = viewport.getHeight();
+   info->orientation = android::ui::toRotationInt(dstate.orientation);
+-  info->fps = dconfig.refreshRate;
++  info->fps = dconfig.peakRefreshRate;
+   info->density = dinfo.density;
+   info->xdpi = dconfig.xDpi;
+   info->ydpi = dconfig.yDpi;
+-- 
+2.43.0
