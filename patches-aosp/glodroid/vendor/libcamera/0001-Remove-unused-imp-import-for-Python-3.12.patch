@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 30 Aug 2026 01:03:00 -0700
+Subject: [PATCH] ipc: remove unused imp import for Python 3.12
+
+Python 3.12 removed the deprecated imp module. The bundled Mojo file utility
+does not use it, so drop the import.
+---
+ utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py b/utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py
+index bf626f5..bbbbbbb 100644
+--- a/utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py
++++ b/utils/ipc/mojo/public/tools/mojom/mojom/fileutil.py
+@@ -3,7 +3,6 @@
+ # found in the LICENSE file.
+ 
+ import errno
+-import imp
+ import os.path
+ import sys
+ 
+-- 
+2.43.0
