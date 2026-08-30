@@ -15,7 +15,7 @@ index 83a5944..6666666 100644
      ta_audio_mux.c
  
  LOCAL_CFLAGS += -D__STDC_FORMAT_MACROS -Wno-deprecated-declarations
-+LOCAL_C_INCLUDES += $(ANDROID_BUILD_TOP)/glodroid/vendor/ffmpeg
++LOCAL_C_INCLUDES += ./glodroid/vendor/ffmpeg
  LOCAL_LDLIBS +=
  LOCAL_SHARED_LIBRARIES := \
      libcutils \
