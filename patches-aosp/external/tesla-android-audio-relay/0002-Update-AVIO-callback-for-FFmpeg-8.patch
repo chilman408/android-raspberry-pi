@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 11:10:00 -0700
+Subject: [PATCH] audio-relay: update AVIO callback for FFmpeg 8
+
+FFmpeg 8 makes the write callback buffer const. Match the public callback
+signature; the relay only reads the supplied data.
+---
+ ta_audio_mux.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ta_audio_mux.c b/ta_audio_mux.c
+index 0fee7be..7777777 100644
+--- a/ta_audio_mux.c
++++ b/ta_audio_mux.c
+@@ -362,7 +362,7 @@ static void sp_feed(ta_mux_t* m, const uint8_t *data, size_t len){
+ }
+ 
+ // ---------- AVIO callbacks ----------
+-static int avio_write_cb(void* opaque, uint8_t* buf, int buf_size){
++static int avio_write_cb(void* opaque, const uint8_t* buf, int buf_size){
+   TR_AVIO("avio_write_cb: %d bytes", buf_size);
+   hexdump16(buf, buf_size);
+   sp_feed((ta_mux_t*)opaque, buf, (size_t)buf_size);
+-- 
+2.43.0

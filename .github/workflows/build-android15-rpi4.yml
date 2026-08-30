@@ -77,7 +77,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes \
-            bc bison build-essential ccache cpio curl device-tree-compiler dosfstools \
+            bc bison build-essential ccache cmake cpio curl device-tree-compiler dosfstools \
             flex fontconfig g++-multilib gcc-multilib gdisk gettext git-core git-lfs \
             gnupg lib32ncurses-dev lib32z1-dev libc6-dev-i386 libglib2.0-dev \
             libgl1-mesa-dev libgmp-dev libgnutls28-dev libmpc-dev libncurses-dev \
@@ -106,6 +106,16 @@ jobs:
 
       - name: Prepare signing and TLS material
         run: bash tools/prepare-build-credentials.sh
+
+      - name: Refresh Android 15 external build intermediates
+        shell: bash
+        run: |
+          set -euo pipefail
+          product_obj="$GITHUB_WORKSPACE/aosptree/out/target/product/gd_rpi4/obj"
+          rm -rf -- \
+            "$product_obj/AOSPEXT/FFMPEG" \
+            "$product_obj/AOSPEXT/LIBCAMERA" \
+            "$product_obj/GLODROID/KERNEL"
 
       - name: Build Raspberry Pi 4 image
         run: bash build_rpi4.sh

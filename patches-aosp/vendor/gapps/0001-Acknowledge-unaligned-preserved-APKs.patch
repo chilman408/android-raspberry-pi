@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 11:12:00 -0700
+Subject: [PATCH] gapps: acknowledge unaligned preserved APKs
+
+Android 15 validates preprocessed, presigned APKs more strictly. These two
+vendor APKs are intentionally preserved byte-for-byte and are known to have
+alignment issues, so use the narrow per-module escape hatch supplied by
+Soong.
+---
+ arm64/Android.bp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arm64/Android.bp b/arm64/Android.bp
+index 1111111..2222222 100644
+--- a/arm64/Android.bp
++++ b/arm64/Android.bp
+@@ -6,6 +6,7 @@ android_app_import {
+     owner: "gapps",
+     apk: "proprietary/product/priv-app/GmsCore/GmsCore.apk",
+     preprocessed: true,
++    skip_preprocessed_apk_checks: true,
+     presigned: true,
+     dex_preopt: {
+         enabled: false,
+@@ -70,6 +71,7 @@ android_app_import {
+     owner: "gapps",
+     apk: "proprietary/product/priv-app/Velvet/Velvet.apk",
+     preprocessed: true,
++    skip_preprocessed_apk_checks: true,
+     presigned: true,
+     dex_preopt: {
+         enabled: false,
+-- 
+2.43.0
