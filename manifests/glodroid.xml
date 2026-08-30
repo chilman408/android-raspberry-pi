@@ -19,7 +19,6 @@
   <remove-project name="device/linaro/hikey" />
 
   <project path="glodroid"                        remote="glodroid" name="glodroid_configuration.git" groups="glodroid" revision="refs/tags/basedir-v0.9.0" />
-  <project path="glodroid/configuration"          remote="glodroid" name="glodroid_configuration.git" groups="glodroid" revision="c82b898997a47b699869e9650920eacecc4fd14d" />
 
   <!-- gpu+display components (vendor) -->
   <project path="glodroid/vendor/minigbm"         remote="aosp" name="platform/external/minigbm"        groups="glodroid" revision="93e16b90294c4634d43c4987f194204ac3b80ac8" />

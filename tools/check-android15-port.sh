@@ -42,13 +42,22 @@ require_match "manifests/glodroid.xml" 'kernel-broadcom-2024w50' \
 require_match "build_rpi4.sh" 'tesla_android_rpi4-trunk_staging-userdebug' \
   "The Raspberry Pi 4 build must use the Android 15 release configuration"
 
-require_file "patches-aosp/glodroid/configuration/0003-graphics-drm_hwcomposer-Transition-from-HWC2-to-HWC3.patch" \
+require_match "manifests/glodroid.xml" 'revision="45f05f681224d88d1b170063001b59edc8fc24cf"' \
+  "Android 15 requires the maintained Raspberry Pi U-Boot baseline"
+require_match "manifests/tesla-android.xml" 'revision="c82b898997a47b699869e9650920eacecc4fd14d"' \
+  "Android 15 requires the init_boot-capable GloDroid configuration"
+require_file "patches-aosp/glodroid/configuration/0011-bootscript-Account-for-ab_select-command-u-boot-chan.patch" \
+  "The boot script must use the current U-Boot A/B selection command"
+require_file "patches-aosp/glodroid/bootloader/u-boot/0002-abootcmd-Add-load-subcommand.patch" \
+  "U-Boot must load Android 15 boot, init_boot, and vendor_boot images"
+
+require_file "patches-aosp/glodroid/configuration/0006-graphics-drm_hwcomposer-Transition-from-HWC2-to-HWC3.patch" \
   "Android 15 requires the HWC3 transition"
-require_file "patches-aosp/glodroid/configuration/0013-common-Switch-Bluetooth-HAL-to-AIDL-default.patch" \
+require_file "patches-aosp/glodroid/configuration/0017-common-Switch-Bluetooth-HAL-to-AIDL-default.patch" \
   "Android 15 requires the Bluetooth AIDL HAL"
-require_file "patches-aosp/glodroid/configuration/0014-kconfig-Set-localversion-config-to-android15-0.patch" \
+require_file "patches-aosp/glodroid/configuration/0018-kconfig-Set-localversion-config-to-android15-0.patch" \
   "Kernel modules must use the Android 15 local version"
-require_file "patches-aosp/glodroid/configuration/0015-common-graphics-Remove-legacy-mapper4-in-a-favour-of.patch" \
+require_file "patches-aosp/glodroid/configuration/0019-common-graphics-Remove-legacy-mapper4-in-a-favour-of.patch" \
   "Android 15 graphics must use the current gralloc mapper"
 require_file "patches-aosp/hardware/interfaces/0002-HCI-Fix-improper-rfkill-handling.patch" \
   "The Raspberry Pi Bluetooth rfkill fix is required"
