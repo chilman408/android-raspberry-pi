@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 30 Aug 2026 00:02:00 -0700
+Subject: [PATCH] cmake: raise minimum version for CMake 4
+
+CMake 4 no longer accepts a compatibility baseline below 3.5.
+---
+ CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bc64168..aaaaaaa 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -3,7 +3,7 @@
+ # Run with -DTEST=ON to build unit tests
+ 
+ PROJECT ( YUV C CXX )	# "C" is required even for C++ projects
+-CMAKE_MINIMUM_REQUIRED( VERSION 2.8.12 )
++CMAKE_MINIMUM_REQUIRED( VERSION 3.5 )
+ OPTION( TEST "Built unit tests" OFF )
+ 
+ SET ( ly_base_dir	${PROJECT_SOURCE_DIR} )
+-- 
+2.43.0
