@@ -16,7 +16,7 @@ diff --git a/framework/src/android/net/ConnectivityManager.java b/framework/src/
 index 3d20c3d..0000000 100644
 --- a/framework/src/android/net/ConnectivityManager.java
 +++ b/framework/src/android/net/ConnectivityManager.java
-@@ -50,7 +50,6 @@ import android.net.TetheringManager.StartTetheringCallback;
+@@ -50,6 +50,5 @@ import android.net.TetheringManager.StartTetheringCallback;
  import android.net.TetheringManager.TetheringEventCallback;
  import android.net.TetheringManager.TetheringRequest;
 -import android.net.wifi.FakeWifi;

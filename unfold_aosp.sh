@@ -24,6 +24,11 @@ if ! git diff --cached --quiet; then
 fi
 popd
 
+echo Clean interrupted Git operations from cached source checkouts
+pushd aosptree
+repo forall -c 'git am --abort >/dev/null 2>&1 || true; git rebase --abort >/dev/null 2>&1 || true; git cherry-pick --abort >/dev/null 2>&1 || true; true'
+popd
+
 echo Sync repo tree
 pushd aosptree
 repo sync --no-clone-bundle --no-tags -j$(nproc --all) -v
