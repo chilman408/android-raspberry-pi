@@ -1,26 +1,28 @@
 From 968cf201800dde620907f7217cb84b2f2cba0711 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Micha=C5=82=20Gapi=C5=84ski?= <mike@gapinski.eu>
 Date: Wed, 1 May 2024 17:07:32 +0000
-Subject: [PATCH 01/16] write bootloader-update image to vendor_dlkm
+Subject: [PATCH] write bootloader-update image to vendor_dlkm
 
+Rebase the Tesla Android updater payload onto the Android 15 GloDroid
+kernel makefile layout.
 ---
  platform/kernel/kernel.mk | 13 +++++++++++++
  1 file changed, 13 insertions(+)
 
 diff --git a/platform/kernel/kernel.mk b/platform/kernel/kernel.mk
-index d49b729..7d77a96 100644
+index 3f027ad..7d77a96 100644
 --- a/platform/kernel/kernel.mk
 +++ b/platform/kernel/kernel.mk
-@@ -69,12 +69,25 @@ BOARD_PREBUILT_DTBOIMAGE := $(PRODUCT_OUT)/boot_dtbo.img
- MKDTBOIMG		:= $(HOST_OUT_EXECUTABLES)/mkdtboimg
- GEN_DTBCFG		:= $(PRODUCT_OUT)/gen/DTBO/dtbo.cfg
+@@ -66,12 +66,25 @@ ANDROID_DTS_OVERLAY	?= $(LOCAL_PATH)/empty.dts
+ 
+ DTB_OUTPUT		:= $(PRODUCT_OUT)/dtb.img
  
 +RPI_FIRMWARE_DIR := glodroid/bootloader/raspberry-fw
 +DTBS_DIR      := $(KERNEL_OUT)/install/dtbs
 +
  $(TARGET_VENDOR_MODULES)/modules.dep: $(KERNEL_TARGET)
  	rm -rf $(TARGET_VENDOR_MODULES)/kernel
- 	rm -f $(TARGET_VENDOR_MODULES)/modules.*
+ 	ls $(TARGET_VENDOR_MODULES)/modules.* | grep -v modules.blocklist | xargs rm -f
  	mkdir -p $(TARGET_VENDOR_MODULES)/kernel
  	cp -r $(KERNEL_OUT)/install/modules/lib/modules/GloDroid/kernel/* $(TARGET_VENDOR_MODULES)/kernel/
  	cp -r $(KERNEL_OUT)/install/modules/lib/modules/GloDroid/modules.* $(TARGET_VENDOR_MODULES)/
@@ -38,5 +40,4 @@ index d49b729..7d77a96 100644
  
  $(PRODUCT_OUT)/kernel: $(KERNEL_TARGET) $(TARGET_VENDOR_MODULES)/modules.dep
 -- 
-2.34.1
-
+2.51.0
