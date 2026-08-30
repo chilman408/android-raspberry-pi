@@ -19,6 +19,7 @@
   <remove-project name="device/linaro/hikey" />
 
   <project path="glodroid"                        remote="glodroid" name="glodroid_configuration.git" groups="glodroid" revision="refs/tags/basedir-v0.9.0" />
+  <project path="glodroid/configuration"          remote="glodroid" name="glodroid_configuration.git" groups="glodroid" revision="c82b898997a47b699869e9650920eacecc4fd14d" />
 
   <!-- gpu+display components (vendor) -->
   <project path="glodroid/vendor/minigbm"         remote="aosp" name="platform/external/minigbm"        groups="glodroid" revision="93e16b90294c4634d43c4987f194204ac3b80ac8" />
@@ -46,10 +47,10 @@
   <project path="external/wpa_supplicant_8"       remote="aosp"     name="platform/external/wpa_supplicant_8"   revision="1d9ae9a55470b894973457e3a4892a8820ca1bd7" />
 
   <!-- bootloader components (platform) -->
-  <project path="glodroid/bootloader/u-boot"      remote="github" name="u-boot/u-boot.git"    groups="glodroid" revision="4459ed60cb1e0562bc5b40405e2b4b9bbf766d57" />
+  <project path="glodroid/bootloader/u-boot"      remote="github" name="u-boot/u-boot.git"    groups="glodroid" revision="45f05f681224d88d1b170063001b59edc8fc24cf" />
 
   <project path="glodroid/bootloader/atf"         name="platform/external/arm-trusted-firmware" groups="glodroid" revision="a127b99d5a063c798d1c6d2e1d4791a630f78355" />
-  <project path="glodroid/bootloader/raspberry-fw"  remote="github"  name="raspberrypi/firmware.git" groups="glodroid" revision="bc7f439c234e19371115e07b57c366df59cc1bc7" clone-depth="1" />
+  <project path="glodroid/bootloader/raspberry-fw"  remote="github"  name="raspberrypi/firmware.git" groups="glodroid" revision="57b8dbdce68c8f5e2a425d86e4e7e149e911b9d3" clone-depth="1" />
 
   <!-- kernel/firmware components (platform) -->
   <project path="glodroid/kernel/broadcom"        remote="glodroid" name="glodroid_forks.git" groups="glodroid" revision="refs/tags/kernel-broadcom-2024w50" />

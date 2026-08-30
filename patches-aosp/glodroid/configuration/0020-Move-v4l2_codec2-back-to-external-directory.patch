@@ -1,11 +1,7 @@
-From 83346b75b47165f7fb353306b05893ebf06ae144 Mon Sep 17 00:00:00 2001
+From bf11f9fffea6c727762f4eca061444ef5409bfe3 Mon Sep 17 00:00:00 2001
 From: Roman Stratiienko <r.stratiienko@gmail.com>
 Date: Tue, 10 Dec 2024 15:42:52 +0200
-Subject: [PATCH] Move v4l2_codec2 back to external/ directory
-
-Tesla Android's configuration fork still points the Soong namespace at
-glodroid/vendor/v4l2_codec2. Replace that path as part of the Android 15
-migration instead of adding a second namespace entry.
+Subject: [PATCH 20/20] Move v4l2_codec2 back to external/ directory
 
 Signed-off-by: Roman Stratiienko <r.stratiienko@gmail.com>
 ---
@@ -13,6 +9,7 @@ Signed-off-by: Roman Stratiienko <r.stratiienko@gmail.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/common/codecs/device.mk b/common/codecs/device.mk
+index c9a607e..53769a7 100644
 --- a/common/codecs/device.mk
 +++ b/common/codecs/device.mk
 @@ -4,7 +4,7 @@
@@ -26,3 +23,4 @@ diff --git a/common/codecs/device.mk b/common/codecs/device.mk
      android.hardware.media.c2@1.0-service \
 -- 
 2.43.0
+

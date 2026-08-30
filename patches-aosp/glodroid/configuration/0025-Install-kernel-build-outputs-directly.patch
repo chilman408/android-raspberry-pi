@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Hilman <hilman@users.noreply.github.com>
-Date: Sat, 29 Aug 2026 21:20:00 -0700
+Date: Sun, 30 Aug 2026 11:00:00 -0700
 Subject: [PATCH] kernel: install build outputs without distro installkernel
 
 Newer Ubuntu installkernel implementations do not reliably honor the
@@ -8,25 +8,35 @@ kernel INSTALL_PATH naming convention used here. Copy the image and
 metadata directly from the kernel output directory after modules and DTBs
 are installed.
 ---
- platform/tools/makefile_kernel.mk | 6 +++---
- 1 file changed, 3 insertions(+), 3 deletions(-)
+ platform/tools/makefile_kernel.mk | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/platform/tools/makefile_kernel.mk b/platform/tools/makefile_kernel.mk
-index ccdc39c..9999999 100644
+index 68c5fd1..9999999 100644
 --- a/platform/tools/makefile_kernel.mk
 +++ b/platform/tools/makefile_kernel.mk
-@@ -45,9 +45,9 @@ $(INSTALL_TARGET): $(BUILD_TARGET)
+@@ -46,17 +46,17 @@ $(INSTALL_TARGET): $(BUILD_TARGET)
  
  	export KERNELRELEASE=$$(cat $(OUT_BUILD_DIR)/include/config/kernel.release)
  
--	@mv $(OUT_INSTALL_DIR)/vmlinuz-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
 -	@mv $(OUT_INSTALL_DIR)/config-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/config
 -	@mv $(OUT_INSTALL_DIR)/System.map-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/System.map
-+	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
 +	@cp $(OUT_BUILD_DIR)/.config $(OUT_INSTALL_DIR)/config
 +	@cp $(OUT_BUILD_DIR)/System.map $(OUT_INSTALL_DIR)/System.map
  
  	@rm -rf $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
- 	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
+-	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
++	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
+ 
+ ifeq ($(TARGET_ARCH),arm64)
+-	@mv $(OUT_INSTALL_DIR)/vmlinux-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinux
++	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinux
+ 	@lz4c -f -c1 $(OUT_INSTALL_DIR)/vmlinux $(OUT_INSTALL_DIR)/kernel &>>$@ || (cat $@.tmp && exit 1)
+ else
+-	@mv $(OUT_INSTALL_DIR)/vmlinuz-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
++	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
+ 	@cp $(OUT_INSTALL_DIR)/vmlinuz $(OUT_INSTALL_DIR)/kernel
+ endif
+ 
 -- 
-2.43.0
+2.51.0
