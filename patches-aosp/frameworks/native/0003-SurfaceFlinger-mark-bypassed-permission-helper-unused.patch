@@ -14,14 +14,10 @@ diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinge
 index 71f9b00..4444444 100644
 --- a/services/surfaceflinger/SurfaceFlinger.cpp
 +++ b/services/surfaceflinger/SurfaceFlinger.cpp
-@@ -591,7 +591,7 @@ bool callingThreadHasUnscopedSurfaceFlingerAccess(bool usePermissionCache) {
-     return true;
- }
- 
+@@ -600,3 +600,3 @@
 -static bool hasCaptureBlackoutContentPermission() {
 +[[maybe_unused]] static bool hasCaptureBlackoutContentPermission() {
      IPCThreadState* ipc = IPCThreadState::self();
      const uid_t uid = ipc->getCallingUid();
-     if (uid == AID_GRAPHICS || uid == AID_SYSTEM) {
 -- 
 2.43.0
