@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 21:18:00 -0700
+Subject: [PATCH] cmake: raise minimum version for CMake 4
+
+CMake 4 removed compatibility with projects declaring a minimum below 3.5.
+The libyaml build does not rely on behavior older than that baseline.
+---
+ CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4f81148..8888888 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,5 +1,5 @@
+ 
+-cmake_minimum_required(VERSION 3.0)
++cmake_minimum_required(VERSION 3.5)
+ project (yaml C)
+ 
+ set (YAML_VERSION_MAJOR 0)
+-- 
+2.43.0

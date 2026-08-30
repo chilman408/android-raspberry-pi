@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 21:20:00 -0700
+Subject: [PATCH] kernel: install build outputs without distro installkernel
+
+Newer Ubuntu installkernel implementations do not reliably honor the
+kernel INSTALL_PATH naming convention used here. Copy the image and
+metadata directly from the kernel output directory after modules and DTBs
+are installed.
+---
+ platform/tools/makefile_kernel.mk | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/platform/tools/makefile_kernel.mk b/platform/tools/makefile_kernel.mk
+index ccdc39c..9999999 100644
+--- a/platform/tools/makefile_kernel.mk
++++ b/platform/tools/makefile_kernel.mk
+@@ -45,9 +45,9 @@ $(INSTALL_TARGET): $(BUILD_TARGET)
+ 
+ 	export KERNELRELEASE=$$(cat $(OUT_BUILD_DIR)/include/config/kernel.release)
+ 
+-	@mv $(OUT_INSTALL_DIR)/vmlinuz-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
+-	@mv $(OUT_INSTALL_DIR)/config-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/config
+-	@mv $(OUT_INSTALL_DIR)/System.map-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/System.map
++	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
++	@cp $(OUT_BUILD_DIR)/.config $(OUT_INSTALL_DIR)/config
++	@cp $(OUT_BUILD_DIR)/System.map $(OUT_INSTALL_DIR)/System.map
+ 
+ 	@rm -rf $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
+ 	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
+-- 
+2.43.0
