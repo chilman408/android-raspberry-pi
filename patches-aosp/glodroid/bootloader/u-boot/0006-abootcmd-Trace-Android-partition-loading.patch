@@ -13,7 +13,7 @@ diff --git a/cmd/abootimg.c b/cmd/abootimg.c
 index 7fe199295f..d1a6000000 100644
 --- a/cmd/abootimg.c
 +++ b/cmd/abootimg.c
-@@ -195,11 +195,14 @@ static int abootimg_smart_load(struct blk_desc *desc, struct disk_partition *in
+@@ -195,14 +195,17 @@ static int abootimg_smart_load(struct blk_desc *desc, struct disk_partition *in
  {
  	int ret, size;
  
@@ -31,7 +31,7 @@ index 7fe199295f..d1a6000000 100644
  
 +	printf("ANDROID: Image header recognized; reading smart payload.\n");
  	ret = blk_dread(desc, info->start, DIV_ROUND_UP(size, info->blksz), addr);
-@@ -329,16 +332,23 @@ static int do_abootimg_load(struct cmd_tbl *cmdtp, int flag, int argc,
+@@ -329,19 +332,26 @@ static int do_abootimg_load(struct cmd_tbl *cmdtp, int flag, int argc,
  		return CMD_RET_FAILURE;
  	}
  
