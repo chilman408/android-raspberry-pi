@@ -127,6 +127,11 @@ jobs:
         run: |
           set -euo pipefail
           artifact_root="$GITHUB_WORKSPACE/artifacts"
+          if [[ -z "${GITHUB_WORKSPACE:-}" || "$artifact_root" != "$GITHUB_WORKSPACE/artifacts" ]]; then
+            echo "ERROR: refusing to clean unexpected artifact directory: $artifact_root" >&2
+            exit 1
+          fi
+          rm -rf -- "$artifact_root"
           mkdir -p "$artifact_root"
           short_sha="${GITHUB_SHA:0:12}"
           prefix="TeslaAndroid-15-rpi4-$short_sha"

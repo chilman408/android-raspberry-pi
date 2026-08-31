@@ -53,6 +53,9 @@ require_file "patches-aosp/glodroid/bootloader/u-boot/0002-abootcmd-Add-load-sub
 require_match ".github/workflows/build-android15-rpi4.yml" \
   'UBOOT_OBJ' \
   "The build must discard stale U-Boot intermediates after bootloader revision changes"
+require_match ".github/workflows/build-android15-rpi4.yml" \
+  'rm -rf -- "\$artifact_root"' \
+  "The packaging step must remove artifacts retained by the self-hosted runner"
 require_file "patches-aosp/glodroid/bootloader/u-boot/0006-abootcmd-Trace-Android-partition-loading.patch" \
   "Bring-up images must expose the exact U-Boot partition-loading failure stage"
 require_file "patches-aosp/glodroid/configuration/0026-bootscript-Preserve-A-B-retries-during-bring-up.patch" \
