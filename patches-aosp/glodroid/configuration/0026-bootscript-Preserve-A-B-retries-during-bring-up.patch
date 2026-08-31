@@ -1,0 +1,26 @@
+From 6844fe7d7022252b623409324090c14f37bf0001 Mon Sep 17 00:00:00 2001
+From: Hilman <hilman@users.noreply.github.com>
+Date: Sun, 30 Aug 2026 16:01:00 -0700
+Subject: [PATCH] bootscript: preserve A/B retries during bring-up
+
+Do not consume slot retry counters while diagnosing the pre-kernel reset.
+This prevents the underlying failure from being replaced by bcb error -22.
+---
+ platform/uboot/bootscript.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/platform/uboot/bootscript.cpp b/platform/uboot/bootscript.cpp
+index acbbdf2..d1a6000 100644
+--- a/platform/uboot/bootscript.cpp
++++ b/platform/uboot/bootscript.cpp
+@@ -82,7 +82,7 @@ FUNC_BEGIN(bootcmd_bcb)
+  if test STRESC(\${androidrecovery}) != STRESC(true);
+  then
+   /* ab_select is used as counter of failed boot attempts. After 14 failed boot attempt fallback to fastboot. */
+-  bcb ab_select slot_name mmc \${mmc_bootdev}#misc || run enter_fastboot ;
++  bcb ab_select slot_name mmc \${mmc_bootdev}#misc --no-dec || run enter_fastboot ;
+  fi;
+ 
+  FEXTENV(bootargs, " androidboot.slot_suffix=_\$slot_name") ;
+-- 
+2.51.0
