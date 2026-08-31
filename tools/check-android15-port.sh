@@ -41,6 +41,12 @@ require_match "manifests/glodroid.xml" 'kernel-broadcom-2024w50' \
   "The manifest must use the Raspberry Pi Linux 6.6 baseline"
 require_match "build_rpi4.sh" 'tesla_android_rpi4-trunk_staging-userdebug' \
   "The Raspberry Pi 4 build must use the Android 15 release configuration"
+require_match "aosptree/vendor/devices-community/gd_rpi4/BoardConfig.mk" \
+  'console=tty0 console=ttyS0,115200' \
+  "Bring-up builds must expose kernel messages on HDMI and serial"
+require_match "aosptree/vendor/devices-community/gd_rpi4/BoardConfig.mk" \
+  'earlycon=uart8250,mmio32,0xfe215040,115200n8' \
+  "Bring-up builds must expose failures before the normal serial console starts"
 
 require_match "manifests/glodroid.xml" 'revision="45f05f681224d88d1b170063001b59edc8fc24cf"' \
   "Android 15 requires the maintained Raspberry Pi U-Boot baseline"

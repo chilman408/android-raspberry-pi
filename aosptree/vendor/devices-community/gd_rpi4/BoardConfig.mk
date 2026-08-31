@@ -11,7 +11,8 @@ BOARD_MESA3D_GALLIUM_DRIVERS := vc4 v3d
 BOARD_MESA3D_VULKAN_DRIVERS := broadcom
 
 BOARD_KERNEL_CMDLINE += coherent_pool=1M 8250.nr_uarts=1 snd_bcm2835.enable_compat_alsa=0 snd_bcm2835.enable_hdmi=1 snd_bcm2835.enable_headphones=1 \
-                        vc_mem.mem_base=0x3ec00000 vc_mem.mem_size=0x40000000 console=ttyS0,115200
+                        vc_mem.mem_base=0x3ec00000 vc_mem.mem_size=0x40000000 console=tty0 console=ttyS0,115200 \
+                        earlycon=uart8250,mmio32,0xfe215040,115200n8 keep_bootcon ignore_loglevel loglevel=8 initcall_debug panic=0
 
 BOARD_LIBCAMERA_IPAS := rpi/vc4
 BOARD_LIBCAMERA_PIPELINES := simple rpi/vc4
