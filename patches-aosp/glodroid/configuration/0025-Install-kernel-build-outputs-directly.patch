@@ -21,23 +21,23 @@ index 68c5fd1..9999999 100644
  
  	export KERNELRELEASE=$$(cat $(OUT_BUILD_DIR)/include/config/kernel.release)
  
--	@mv $(OUT_INSTALL_DIR)/config-${KERNELRELEASE} $(OUT_INSTALL_DIR)/config
--	@mv $(OUT_INSTALL_DIR)/System.map-${KERNELRELEASE} $(OUT_INSTALL_DIR)/System.map
+-	@mv $(OUT_INSTALL_DIR)/config-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/config
+-	@mv $(OUT_INSTALL_DIR)/System.map-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/System.map
 +	@cp $(OUT_BUILD_DIR)/.config $(OUT_INSTALL_DIR)/config
 +	@cp $(OUT_BUILD_DIR)/System.map $(OUT_INSTALL_DIR)/System.map
  
  	@rm -rf $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
--	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
-+	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
+-	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
++	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
  
  ifeq ($(TARGET_ARCH),arm64)
--	@mv $(OUT_INSTALL_DIR)/vmlinux-${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinux
+-	@mv $(OUT_INSTALL_DIR)/vmlinux-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinux
 +	@cp $(OUT_BUILD_DIR)/arch/arm64/boot/Image $(OUT_INSTALL_DIR)/vmlinux
 +	@test "$$(od -An -tx1 -j 56 -N 4 $(OUT_INSTALL_DIR)/vmlinux | tr -d ' \n')" = "41524d64" || (echo "ERROR: ARM64 Image magic missing before LZ4 compression" >&2; exit 1)
  	@lz4c -f -c1 $(OUT_INSTALL_DIR)/vmlinux $(OUT_INSTALL_DIR)/kernel &>>$@ || (cat $@.tmp && exit 1)
  else
--	@mv $(OUT_INSTALL_DIR)/vmlinuz-${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
-+	@cp $(OUT_BUILD_DIR)/${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
+-	@mv $(OUT_INSTALL_DIR)/vmlinuz-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
++	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
  	@cp $(OUT_INSTALL_DIR)/vmlinuz $(OUT_INSTALL_DIR)/kernel
  endif
  
