@@ -6,35 +6,38 @@ Subject: [PATCH] kernel: install build outputs without distro installkernel
 Newer Ubuntu installkernel implementations do not reliably honor the
 kernel INSTALL_PATH naming convention used here. Copy the image and
 metadata directly from the kernel output directory after modules and DTBs
-are installed.
+are installed. Always use the uncompressed ARM64 Image as the LZ4 input;
+image_name can resolve to Image.gz and would otherwise create a nested
+LZ4+gzip payload that U-Boot cannot execute after one decompression pass.
 ---
- platform/tools/makefile_kernel.mk | 8 ++++----
- 1 file changed, 4 insertions(+), 4 deletions(-)
+ platform/tools/makefile_kernel.mk | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
 
 diff --git a/platform/tools/makefile_kernel.mk b/platform/tools/makefile_kernel.mk
 index 68c5fd1..9999999 100644
 --- a/platform/tools/makefile_kernel.mk
 +++ b/platform/tools/makefile_kernel.mk
-@@ -46,17 +46,17 @@ $(INSTALL_TARGET): $(BUILD_TARGET)
+@@ -46,17 +46,18 @@ $(INSTALL_TARGET): $(BUILD_TARGET)
  
  	export KERNELRELEASE=$$(cat $(OUT_BUILD_DIR)/include/config/kernel.release)
  
--	@mv $(OUT_INSTALL_DIR)/config-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/config
--	@mv $(OUT_INSTALL_DIR)/System.map-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/System.map
+-	@mv $(OUT_INSTALL_DIR)/config-${KERNELRELEASE} $(OUT_INSTALL_DIR)/config
+-	@mv $(OUT_INSTALL_DIR)/System.map-${KERNELRELEASE} $(OUT_INSTALL_DIR)/System.map
 +	@cp $(OUT_BUILD_DIR)/.config $(OUT_INSTALL_DIR)/config
 +	@cp $(OUT_BUILD_DIR)/System.map $(OUT_INSTALL_DIR)/System.map
  
  	@rm -rf $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
--	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
-+	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/$${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
+-	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
++	@mv $(OUT_INSTALL_DIR)/modules/lib/modules/${KERNELRELEASE} $(OUT_INSTALL_DIR)/modules/lib/modules/GloDroid
  
  ifeq ($(TARGET_ARCH),arm64)
--	@mv $(OUT_INSTALL_DIR)/vmlinux-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinux
-+	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinux
+-	@mv $(OUT_INSTALL_DIR)/vmlinux-${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinux
++	@cp $(OUT_BUILD_DIR)/arch/arm64/boot/Image $(OUT_INSTALL_DIR)/vmlinux
++	@test "$$(od -An -tx1 -j 56 -N 4 $(OUT_INSTALL_DIR)/vmlinux | tr -d ' \n')" = "41524d64" || (echo "ERROR: ARM64 Image magic missing before LZ4 compression" >&2; exit 1)
  	@lz4c -f -c1 $(OUT_INSTALL_DIR)/vmlinux $(OUT_INSTALL_DIR)/kernel &>>$@ || (cat $@.tmp && exit 1)
  else
--	@mv $(OUT_INSTALL_DIR)/vmlinuz-$${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
-+	@cp $(OUT_BUILD_DIR)/$${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
+-	@mv $(OUT_INSTALL_DIR)/vmlinuz-${KERNELRELEASE} $(OUT_INSTALL_DIR)/vmlinuz
++	@cp $(OUT_BUILD_DIR)/${KERNEL_IMAGE} $(OUT_INSTALL_DIR)/vmlinuz
  	@cp $(OUT_INSTALL_DIR)/vmlinuz $(OUT_INSTALL_DIR)/kernel
  endif
  

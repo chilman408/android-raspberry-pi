@@ -57,6 +57,15 @@ require_file "patches-aosp/glodroid/bootloader/u-boot/0006-abootcmd-Trace-Androi
   "Bring-up images must expose the exact U-Boot partition-loading failure stage"
 require_file "patches-aosp/glodroid/configuration/0026-bootscript-Preserve-A-B-retries-during-bring-up.patch" \
   "Bring-up images must not exhaust both A/B slots while diagnosing boot resets"
+require_match "patches-aosp/glodroid/configuration/0025-Install-kernel-build-outputs-directly.patch" \
+  'cp \$\(OUT_BUILD_DIR\)/arch/arm64/boot/Image \$\(OUT_INSTALL_DIR\)/vmlinux' \
+  "The ARM64 boot payload must start from an uncompressed Linux Image"
+require_match "patches-aosp/glodroid/configuration/0025-Install-kernel-build-outputs-directly.patch" \
+  '41524d64' \
+  "The kernel install must verify the ARM64 Image magic before LZ4 compression"
+reject_match "patches-aosp/glodroid/configuration/0025-Install-kernel-build-outputs-directly.patch" \
+  'cp \$\(OUT_BUILD_DIR\)/\$\$\{KERNEL_IMAGE\} \$\(OUT_INSTALL_DIR\)/vmlinux' \
+  "Do not wrap an image_name-selected Image.gz inside LZ4"
 
 require_file "patches-aosp/glodroid/configuration/0006-graphics-drm_hwcomposer-Transition-from-HWC2-to-HWC3.patch" \
   "Android 15 requires the HWC3 transition"
