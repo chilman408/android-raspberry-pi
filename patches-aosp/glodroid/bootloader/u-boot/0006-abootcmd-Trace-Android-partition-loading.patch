@@ -3,41 +3,35 @@ From: Hilman <hilman@users.noreply.github.com>
 Date: Sun, 30 Aug 2026 16:00:00 -0700
 Subject: [PATCH] abootcmd: trace Android partition loading
 
-Add checkpoints around allocation, header probing, smart loading, and the
-fallback full-partition read. This distinguishes a reset in the allocator
-from one in Android image parsing or MMC block I/O.
+Add checkpoints around allocation, smart loading, and the fallback
+full-partition read.
 ---
- cmd/abootimg.c | 17 ++++++++++++++++-
- 1 file changed, 16 insertions(+), 1 deletion(-)
+ cmd/abootimg.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
 
 diff --git a/cmd/abootimg.c b/cmd/abootimg.c
 index 7fe199295f..d1a6000000 100644
 --- a/cmd/abootimg.c
 +++ b/cmd/abootimg.c
-@@ -202,13 +202,20 @@ static int abootimg_smart_load(struct blk_desc *desc, struct disk_partition *in
- 		return CMD_RET_FAILURE;
- 	}
+@@ -195,11 +195,14 @@ static int abootimg_smart_load(struct blk_desc *desc, struct disk_partition *in
+ {
+ 	int ret, size;
  
-+	printf("ANDROID: Header block read; probing image format...\n");
- 	size = android_image_get_valuable_size(addr);
--	if (size == 0)
-+	if (size == 0) {
-+		printf("ANDROID: Header not recognized; smart load unavailable.\n");
- 		return 0;
-+	}
- 
-+	printf("ANDROID: Smart image size is 0x%x bytes; reading payload...\n",
-+	       size);
- 	ret = blk_dread(desc, info->start, DIV_ROUND_UP(size, info->blksz), addr);
++	printf("ANDROID: Reading image header block...\n");
+ 	ret = blk_dread(desc, info->start, 4096 / info->blksz, addr);
  	if (ret < 0) {
  		printf("Error: Failed to read partition\n");
  		return CMD_RET_FAILURE;
  	}
-+	printf("ANDROID: Smart payload read completed.\n");
++	printf("ANDROID: Image header block read completed.\n");
  
- 	memset(addr + size, 0, info->size * info->blksz - size);
+ 	size = android_image_get_valuable_size(addr);
+ 	if (size == 0)
+ 		return 0;
  
-@@ -329,17 +336,25 @@ static int do_abootimg_load(struct cmd_tbl *cmdtp, int flag, int argc,
++	printf("ANDROID: Image header recognized; reading smart payload.\n");
+ 	ret = blk_dread(desc, info->start, DIV_ROUND_UP(size, info->blksz), addr);
+@@ -329,16 +332,23 @@ static int do_abootimg_load(struct cmd_tbl *cmdtp, int flag, int argc,
  		return CMD_RET_FAILURE;
  	}
  
