@@ -4,6 +4,8 @@ dtparam=uart1=on
 
 # CPU
 arm_boost=1
+# Keep the mini-UART baud rate stable across firmware, U-Boot, and Linux.
+core_freq=250
 
 [all]
 start_x=1
