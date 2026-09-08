@@ -126,6 +126,21 @@ class RuntimeCacheTests(unittest.TestCase):
         self.assertIn("cannot record baseline", result.stderr)
         self.assertFalse(self.stamp.exists())
 
+    def test_nonexistent_workspace_fails_closed(self):
+        self.workspace = Path(self.temp.name) / "missing-workspace"
+        result = self.run_helper("prepare")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsafe GITHUB_WORKSPACE", result.stderr)
+        self.assertEqual(self.modes(), [])
+
+    def test_regular_file_workspace_fails_closed(self):
+        self.workspace = Path(self.temp.name) / "workspace-file"
+        self.workspace.write_text("not a directory", encoding="utf-8")
+        result = self.run_helper("prepare")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsafe GITHUB_WORKSPACE", result.stderr)
+        self.assertEqual(self.modes(), [])
+
     def test_invalid_baseline_is_rejected(self):
         result = self.run_helper("prepare", "bad\nANDROID_BUILD_MODE=incremental")
         self.assertNotEqual(result.returncode, 0)
