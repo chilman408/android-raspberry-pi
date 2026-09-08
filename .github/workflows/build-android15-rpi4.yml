@@ -50,6 +50,17 @@ jobs:
         shell: bash
         run: bash tools/android-build-cache.sh prepare
 
+      - name: Remove stale packaged artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="$GITHUB_WORKSPACE/artifacts"
+          if [[ -z "${GITHUB_WORKSPACE:-}" || "$artifact_root" != "$GITHUB_WORKSPACE/artifacts" ]]; then
+            echo "ERROR: refusing to clean unexpected artifact directory: $artifact_root" >&2
+            exit 1
+          fi
+          rm -rf -- "$artifact_root"
+
       - name: Verify build host capacity
         shell: bash
         run: |
