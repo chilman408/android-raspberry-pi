@@ -59,7 +59,7 @@ A cached incremental build is allowed only when all of the following are true:
 - The stamp is a regular file.
 - The stamp contains exactly the declared baseline identifier.
 
-Every other state is a fresh-build state, including a missing output directory, missing stamp, unreadable stamp, different value, or unexpected output-path type.
+A missing output directory, missing stamp, unreadable stamp, or different value selects fresh-build mode. An unexpected output-path type is unsafe and fails closed before any cleanup.
 
 For a fresh-build state, the workflow will:
 
