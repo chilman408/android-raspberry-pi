@@ -1,0 +1,37 @@
+From 6d86ad3cc4da0916dc0c78b77ce3946d3605fd4c Mon Sep 17 00:00:00 2001
+From: Tesla Android CI <ci@teslaandroid.local>
+Date: Mon, 7 Sep 2026 20:00:00 -0700
+Subject: [PATCH] rootdir: skip crashing fingerprint expansion during bring-up
+
+The Raspberry Pi 4 Android 15 bring-up reproducibly faults in
+android::base::GetProperty() while init expands ro.build.fingerprint in
+the post-fs-data action. PID 1 receives SIGSEGV and development-build
+fatal handling reboots to the bootloader.
+
+The fingerprint history file is diagnostic bookkeeping and is not
+required to mount data or activate APEX packages. Temporarily skip the
+property-expanding write while retaining the surrounding setup so the
+next image can establish whether long-property lookup is the only
+affected path.
+
+Signed-off-by: Tesla Android CI <ci@teslaandroid.local>
+---
+ rootdir/init.rc | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/rootdir/init.rc b/rootdir/init.rc
+index 2443b7cf6..68a034177 100644
+--- a/rootdir/init.rc
++++ b/rootdir/init.rc
+@@ -772,7 +772,8 @@ on post-fs-data
+     copy /data/misc/recovery/ro.build.fingerprint /data/misc/recovery/ro.build.fingerprint.1
+     chmod 0440 /data/misc/recovery/ro.build.fingerprint.1
+     chown system log /data/misc/recovery/ro.build.fingerprint.1
+-    write /data/misc/recovery/ro.build.fingerprint ${ro.build.fingerprint}
++    # Android 15 RPi4 bring-up: this expansion currently faults in GetProperty().
++    # Skip nonessential fingerprint history until the property-area fault is resolved.
+     chmod 0440 /data/misc/recovery/ro.build.fingerprint
+     chown system log /data/misc/recovery/ro.build.fingerprint
+     mkdir /data/misc/recovery/proc 0770 system log
+-- 
+2.43.0
