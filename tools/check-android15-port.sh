@@ -89,6 +89,8 @@ require_file "patches-aosp/glodroid/configuration/0019-common-graphics-Remove-le
   "Android 15 graphics must use the current gralloc mapper"
 require_file "patches-aosp/hardware/interfaces/0002-HCI-Fix-improper-rfkill-handling.patch" \
   "The Raspberry Pi Bluetooth rfkill fix is required"
+require_file "patches-aosp/system/core/0001-rootdir-Skip-crashing-fingerprint-expansion.patch" \
+  "The Android 15 RPi4 bring-up must bypass the reproducible init fingerprint expansion crash"
 require_file "patches-aosp/packages/modules/Wifi/0005-Fix-UnflaggedApi-build-errors-for-android.net.wifi.T.patch" \
   "The Tesla Android Wi-Fi API patch must be rebased for Android 15"
 
