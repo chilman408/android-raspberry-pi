@@ -148,5 +148,115 @@ class RuntimeCacheTests(unittest.TestCase):
         self.assertEqual(self.modes(), [])
 
 
+CHECKER = REPO_ROOT / "tools" / "check-android15-build-cache.py"
+
+VALID_WORKFLOW = """
+env:
+  ANDROID_BUILD_BASELINE: android-platform-15.0.0_r3-core-clean-v1
+- name: Check out source
+- name: Prepare Android build cache
+  run: bash tools/android-build-cache.sh prepare
+- name: Verify build host capacity
+  run: |
+    if [[ "${ANDROID_BUILD_MODE:?}" == "incremental" ]]; then
+      required_disk_kib=$((150 * 1024 * 1024))
+    else
+      required_disk_kib=$((300 * 1024 * 1024))
+    fi
+- name: Sync and patch Android sources
+- name: Build Raspberry Pi 4 image
+- name: Package flashable artifacts
+- name: Record successful Android build baseline
+  run: bash tools/android-build-cache.sh record
+- name: Upload image artifacts
+"""
+
+VALID_HELPER = r'''
+workspace="$(realpath -m -- "$workspace_input")"
+aosptree_root="$workspace/aosptree"
+out_root="$workspace/aosptree/out"
+stamp_file="$out_root/.android-build-baseline"
+if [[ -L "$aosptree_root" ]]; then exit 1; fi
+if [[ -L "$out_root" ]]; then exit 1; fi
+cmp -s -- "$stamp_file"
+rm -rf -- "$out_root"
+printf 'ANDROID_BUILD_MODE=fresh\n' >> "$GITHUB_ENV"
+printf 'ANDROID_BUILD_MODE=incremental\n' >> "$GITHUB_ENV"
+temporary_stamp="$(mktemp "$out_root/.android-build-baseline.tmp.XXXXXX")"
+mv -f -- "$temporary_stamp" "$stamp_file"
+'''
+
+
+class WorkflowContractTests(unittest.TestCase):
+    def run_checker(self, workflow_text, helper_text):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            workflow = path / "workflow.yml"
+            helper = path / "helper.sh"
+            workflow.write_text(workflow_text, encoding="utf-8")
+            helper.write_text(helper_text, encoding="utf-8")
+            return subprocess.run(
+                ["python3", str(CHECKER), str(workflow), str(helper)],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+    def test_valid_contract_passes(self):
+        result = self.run_checker(VALID_WORKFLOW, VALID_HELPER)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_required_workflow_fragments_are_enforced(self):
+        mutations = (
+            ("android-platform-15.0.0_r3-core-clean-v1", "wrong"),
+            ("run: bash tools/android-build-cache.sh prepare", "run: true"),
+            ("required_disk_kib=$((150 * 1024 * 1024))", "required_disk_kib=1"),
+            ("required_disk_kib=$((300 * 1024 * 1024))", "required_disk_kib=2"),
+            ("run: bash tools/android-build-cache.sh record", "run: true"),
+        )
+        for old, new in mutations:
+            with self.subTest(fragment=old):
+                result = self.run_checker(VALID_WORKFLOW.replace(old, new), VALID_HELPER)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+
+    def test_record_must_follow_packaging(self):
+        mutated = VALID_WORKFLOW.replace(
+            "- name: Package flashable artifacts\n"
+            "- name: Record successful Android build baseline\n",
+            "- name: Record successful Android build baseline\n"
+            "- name: Package flashable artifacts\n",
+        )
+        result = self.run_checker(mutated, VALID_HELPER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("workflow step order", result.stderr)
+
+    def test_existence_only_classification_is_rejected(self):
+        mutated = VALID_WORKFLOW + '\nif [[ -d "$GITHUB_WORKSPACE/aosptree/out" ]]; then true; fi\n'
+        result = self.run_checker(mutated, VALID_HELPER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("existence-only", result.stderr)
+
+    def test_runtime_safety_fragments_are_enforced(self):
+        mutations = (
+            (".android-build-baseline", ".wrong-stamp"),
+            ("cmp -s --", "test -f"),
+            ('realpath -m -- "$workspace_input"', "printf unsafe"),
+            ('-L "$aosptree_root"', '-e "$aosptree_root"'),
+            ('-L "$out_root"', '-e "$out_root"'),
+            ('rm -rf -- "$out_root"', "true"),
+            ("ANDROID_BUILD_MODE=fresh", "MODE=fresh"),
+            ("ANDROID_BUILD_MODE=incremental", "MODE=incremental"),
+            ('mktemp "$out_root/.android-build-baseline.tmp.XXXXXX"', "mktemp"),
+            ('mv -f -- "$temporary_stamp" "$stamp_file"', "cp source destination"),
+        )
+        for old, new in mutations:
+            with self.subTest(fragment=old):
+                result = self.run_checker(VALID_WORKFLOW, VALID_HELPER.replace(old, new))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
