@@ -151,6 +151,19 @@ class RuntimeCacheTests(unittest.TestCase):
         self.assertTrue(self.output.is_symlink())
         self.assertEqual(self.modes(), [])
 
+    def test_aosptree_symlink_fails_closed_and_preserves_target(self):
+        external = Path(self.temp.name) / "external-aosptree"
+        (external / "out").mkdir(parents=True)
+        sentinel = external / "out" / "sentinel"
+        sentinel.write_text("preserve", encoding="utf-8")
+        (self.workspace / "aosptree").symlink_to(external, target_is_directory=True)
+        result = self.run_helper("prepare")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsafe Android source tree path", result.stderr)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
+        self.assertTrue((self.workspace / "aosptree").is_symlink())
+        self.assertEqual(self.modes(), [])
+
     def test_record_writes_exact_stamp_without_temp_file(self):
         self.output.mkdir(parents=True)
         result = self.run_helper("record")
@@ -179,7 +192,7 @@ if __name__ == "__main__":
 
 Run: `python3 -m unittest -v tools/tests/test_android15_build_cache.py`
 
-Expected: 9 errors/failures because `tools/android-build-cache.sh` is absent.
+Expected: 10 errors/failures because `tools/android-build-cache.sh` is absent.
 
 - [ ] **Step 3: Implement the runtime helper**
 
@@ -202,17 +215,27 @@ if [[ ! "$ANDROID_BUILD_BASELINE" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 1
 fi
 
-workspace="${GITHUB_WORKSPACE%/}"
-if [[ -z "$workspace" || "$workspace" == "/" || "$workspace" != /* ]]; then
+workspace_input="${GITHUB_WORKSPACE%/}"
+if [[ -z "$workspace_input" || "$workspace_input" == "/" || "$workspace_input" != /* ]]; then
   echo "ERROR: unsafe GITHUB_WORKSPACE: $GITHUB_WORKSPACE" >&2
   exit 1
 fi
+workspace="$(realpath -m -- "$workspace_input")"
+if [[ "$workspace" != "$workspace_input" ]]; then
+  echo "ERROR: GITHUB_WORKSPACE must be a canonical path: $GITHUB_WORKSPACE" >&2
+  exit 1
+fi
 
-out_root="$workspace/aosptree/out"
+aosptree_root="$workspace/aosptree"
+out_root="$aosptree_root/out"
 expected_out_root="$workspace/aosptree/out"
 stamp_file="$out_root/.android-build-baseline"
 if [[ "$out_root" != "$expected_out_root" ]]; then
   echo "ERROR: refusing unexpected Android output path: $out_root" >&2
+  exit 1
+fi
+if [[ -L "$aosptree_root" || ( -e "$aosptree_root" && ! -d "$aosptree_root" ) ]]; then
+  echo "ERROR: unsafe Android source tree path: $aosptree_root" >&2
   exit 1
 fi
 if [[ -L "$out_root" || ( -e "$out_root" && ! -d "$out_root" ) ]]; then
@@ -271,7 +294,7 @@ python3 -m unittest -v tools/tests/test_android15_build_cache.py
 bash -n tools/android-build-cache.sh
 ```
 
-Expected: 9 tests pass; shell syntax exits 0.
+Expected: 10 tests pass; shell syntax exits 0.
 
 - [ ] **Step 5: Commit the runtime unit**
 
@@ -321,8 +344,11 @@ env:
 """
 
 VALID_HELPER = r'''
+workspace="$(realpath -m -- "$workspace_input")"
+aosptree_root="$workspace/aosptree"
 out_root="$workspace/aosptree/out"
 stamp_file="$out_root/.android-build-baseline"
+if [[ -L "$aosptree_root" ]]; then exit 1; fi
 if [[ -L "$out_root" ]]; then exit 1; fi
 cmp -s -- "$stamp_file"
 rm -rf -- "$out_root"
@@ -388,6 +414,8 @@ class WorkflowContractTests(unittest.TestCase):
         mutations = (
             (".android-build-baseline", ".wrong-stamp"),
             ("cmp -s --", "test -f"),
+            ('realpath -m -- "$workspace_input"', "printf unsafe"),
+            ('-L "$aosptree_root"', '-e "$aosptree_root"'),
             ('-L "$out_root"', '-e "$out_root"'),
             ('rm -rf -- "$out_root"', "true"),
             ("ANDROID_BUILD_MODE=fresh", "MODE=fresh"),
@@ -406,7 +434,7 @@ class WorkflowContractTests(unittest.TestCase):
 
 Run: `python3 -m unittest -v tools/tests/test_android15_build_cache.py`
 
-Expected: 9 runtime tests pass and 5 contract tests fail because the checker is absent.
+Expected: 10 runtime tests pass and 5 contract tests fail because the checker is absent.
 
 - [ ] **Step 3: Implement the checker**
 
@@ -426,6 +454,8 @@ WORKFLOW_REQUIREMENTS = {
     "record invocation": "run: bash tools/android-build-cache.sh record",
 }
 HELPER_REQUIREMENTS = {
+    "normalized workspace": 'realpath -m -- "$workspace_input"',
+    "source-tree symlink guard": '-L "$aosptree_root"',
     "workspace output": 'out_root="$workspace/aosptree/out"',
     "stamp location": 'stamp_file="$out_root/.android-build-baseline"',
     "symlink guard": '-L "$out_root"',
@@ -495,7 +525,7 @@ python3 -m unittest -v tools/tests/test_android15_build_cache.py
 python3 -m py_compile tools/check-android15-build-cache.py tools/tests/test_android15_build_cache.py
 ```
 
-Expected: 14 tests pass; compilation exits 0.
+Expected: 15 tests pass; compilation exits 0.
 
 - [ ] **Step 5: Commit the checker unit**
 
@@ -625,13 +655,13 @@ ruby -e 'require "yaml"; YAML.load_file(ARGV[0], aliases: true)' \
 git diff --check
 ```
 
-Expected: 15 tests pass; shell/Python/YAML checks exit 0; the validator ends with `Android 15 Raspberry Pi baseline validation passed.`
+Expected: 16 tests pass; shell/Python/YAML checks exit 0; the validator ends with `Android 15 Raspberry Pi baseline validation passed.`
 
 - [ ] **Step 8: Review the single-variable diff**
 
 ```bash
-git diff --stat
-git diff -- \
+git diff --stat HEAD~2
+git diff HEAD~2 -- \
   .github/workflows/build-android15-rpi4.yml \
   tools/android-build-cache.sh \
   tools/check-android15-build-cache.py \
