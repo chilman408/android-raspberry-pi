@@ -258,5 +258,57 @@ class WorkflowContractTests(unittest.TestCase):
                 self.assertIn("ERROR:", result.stderr)
 
 
+    def test_declared_baseline_must_match_exactly(self):
+        mutated = VALID_WORKFLOW.replace(
+            "android-platform-15.0.0_r3-core-clean-v1",
+            "android-platform-15.0.0_r3-core-clean-v1-wrong",
+        )
+        result = self.run_checker(mutated, VALID_HELPER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("declared baseline", result.stderr)
+
+    def test_cache_step_names_must_bind_to_their_commands(self):
+        prepare = "run: bash tools/android-build-cache.sh prepare"
+        record = "run: bash tools/android-build-cache.sh record"
+        mutated = (
+            VALID_WORKFLOW.replace(prepare, "run: temporary-command")
+            .replace(record, prepare)
+            .replace("run: temporary-command", record)
+        )
+        result = self.run_checker(mutated, VALID_HELPER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("prepare step", result.stderr)
+        self.assertIn("record step", result.stderr)
+
+    def test_record_step_must_use_default_success_condition(self):
+        mutated = VALID_WORKFLOW.replace(
+            "- name: Record successful Android build baseline\n"
+            "  run: bash tools/android-build-cache.sh record",
+            "- name: Record successful Android build baseline\n"
+            "  if: always()\n"
+            "  run: bash tools/android-build-cache.sh record",
+        )
+        result = self.run_checker(mutated, VALID_HELPER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("record step must use the default success condition", result.stderr)
+
+    def test_build_and_package_must_not_continue_after_errors(self):
+        for step_name in (
+            "Build Raspberry Pi 4 image",
+            "Package flashable artifacts",
+        ):
+            with self.subTest(step=step_name):
+                mutated = VALID_WORKFLOW.replace(
+                    f"- name: {step_name}\n",
+                    f"- name: {step_name}\n"
+                    "  continue-on-error: true\n",
+                )
+                result = self.run_checker(mutated, VALID_HELPER)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f"{step_name} must not continue on error",
+                    result.stderr,
+                )
+
 if __name__ == "__main__":
     unittest.main()
