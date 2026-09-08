@@ -310,6 +310,23 @@ class WorkflowContractTests(unittest.TestCase):
                     result.stderr,
                 )
 
+    def test_repository_cleans_stale_packaged_artifacts_before_capacity_check(self):
+        workflow = (
+            REPO_ROOT / ".github/workflows/build-android15-rpi4.yml"
+        ).read_text(encoding="utf-8")
+        prepare_position = workflow.index("- name: Prepare Android build cache")
+        capacity_position = workflow.index("- name: Verify build host capacity")
+        pre_capacity = workflow[prepare_position:capacity_position]
+
+        for fragment in (
+            'artifact_root="$GITHUB_WORKSPACE/artifacts"',
+            'if [[ -z "${GITHUB_WORKSPACE:-}" || '
+            '"$artifact_root" != "$GITHUB_WORKSPACE/artifacts" ]]; then',
+            'rm -rf -- "$artifact_root"',
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, pre_capacity)
+
     def test_repository_workflow_and_helper_satisfy_contract(self):
         result = subprocess.run(
             [
