@@ -30,6 +30,7 @@ jobs:
       - android-build
     timeout-minutes: 720
     env:
+      ANDROID_BUILD_BASELINE: android-platform-15.0.0_r3-core-clean-v1
       TA_RELEASEKEY_PK8_B64: ${{ secrets.TA_RELEASEKEY_PK8_B64 }}
       TA_RELEASEKEY_X509_B64: ${{ secrets.TA_RELEASEKEY_X509_B64 }}
       TA_PLATFORM_PK8_B64: ${{ secrets.TA_PLATFORM_PK8_B64 }}
@@ -45,18 +46,25 @@ jobs:
         with:
           clean: false
 
+      - name: Prepare Android build cache
+        shell: bash
+        run: bash tools/android-build-cache.sh prepare
+
       - name: Verify build host capacity
         shell: bash
         run: |
           set -euo pipefail
           free_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
           memory_kib="$(awk '/^(MemTotal|SwapTotal):/ {total += $2} END {print total}' /proc/meminfo)"
-          if [[ -d "$GITHUB_WORKSPACE/aosptree/out" ]]; then
+          if [[ "${ANDROID_BUILD_MODE:?}" == "incremental" ]]; then
             required_disk_kib=$((150 * 1024 * 1024))
-            disk_mode="cached incremental build"
-          else
+            disk_mode="same-baseline incremental build"
+          elif [[ "$ANDROID_BUILD_MODE" == "fresh" ]]; then
             required_disk_kib=$((300 * 1024 * 1024))
-            disk_mode="fresh Android checkout"
+            disk_mode="fresh Android build"
+          else
+            echo "ERROR: unexpected Android build mode: $ANDROID_BUILD_MODE" >&2
+            exit 1
           fi
           required_memory_kib=$((40 * 1024 * 1024))
           echo "Free workspace disk: $((free_kib / 1024 / 1024)) GiB"
@@ -158,6 +166,10 @@ jobs:
             sha256sum * > SHA256SUMS
           )
           echo "artifact_name=$prefix" >> "$GITHUB_OUTPUT"
+
+      - name: Record successful Android build baseline
+        shell: bash
+        run: bash tools/android-build-cache.sh record
 
       - name: Upload image artifacts
         uses: actions/upload-artifact@v7
