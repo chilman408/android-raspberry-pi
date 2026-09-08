@@ -24,6 +24,10 @@ if [[ "$workspace" != "$workspace_input" ]]; then
   echo "ERROR: GITHUB_WORKSPACE must be a canonical path: $GITHUB_WORKSPACE" >&2
   exit 1
 fi
+if [[ ! -d "$workspace" || -L "$workspace" ]]; then
+  echo "ERROR: unsafe GITHUB_WORKSPACE: $GITHUB_WORKSPACE" >&2
+  exit 1
+fi
 
 aosptree_root="$workspace/aosptree"
 out_root="$aosptree_root/out"
