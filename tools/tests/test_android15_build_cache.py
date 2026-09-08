@@ -310,5 +310,20 @@ class WorkflowContractTests(unittest.TestCase):
                     result.stderr,
                 )
 
+    def test_repository_workflow_and_helper_satisfy_contract(self):
+        result = subprocess.run(
+            [
+                "python3",
+                str(CHECKER),
+                str(REPO_ROOT / ".github/workflows/build-android15-rpi4.yml"),
+                str(HELPER),
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 if __name__ == "__main__":
     unittest.main()
