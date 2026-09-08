@@ -66,6 +66,12 @@ require_match ".github/workflows/build-android15-rpi4.yml" \
   'rm -rf -- "\$artifact_root"' \
   "The packaging step must remove artifacts retained by the self-hosted runner"
 
+if ! python3 tools/check-android15-build-cache.py \
+    .github/workflows/build-android15-rpi4.yml \
+    tools/android-build-cache.sh; then
+  failures=$((failures + 1))
+fi
+
 if ! python3 -m unittest -v tools/tests/test_android15_build_cache.py; then
   failures=$((failures + 1))
 fi
