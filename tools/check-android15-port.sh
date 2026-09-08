@@ -91,6 +91,9 @@ require_file "patches-aosp/hardware/interfaces/0002-HCI-Fix-improper-rfkill-hand
   "The Raspberry Pi Bluetooth rfkill fix is required"
 require_file "patches-aosp/system/core/0001-rootdir-Skip-crashing-fingerprint-expansion.patch" \
   "The Android 15 RPi4 bring-up must bypass the reproducible init fingerprint expansion crash"
+require_match "patches-aosp/system/core/0001-rootdir-Skip-crashing-fingerprint-expansion.patch" \
+  'Skip nonessential fingerprint history until the property-area fault is resolved' \
+  "The init crash workaround must skip the ro.build.fingerprint expansion"
 require_file "patches-aosp/packages/modules/Wifi/0005-Fix-UnflaggedApi-build-errors-for-android.net.wifi.T.patch" \
   "The Tesla Android Wi-Fi API patch must be rebased for Android 15"
 
