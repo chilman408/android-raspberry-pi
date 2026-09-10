@@ -78,6 +78,9 @@ fi
 if ! python3 -m unittest -v tools/tests/test_android15_ih8sn_patch.py; then
   failures=$((failures + 1))
 fi
+if ! python3 -m unittest -v tools/tests/test_android15_connectivity_fakewifi_patch.py; then
+  failures=$((failures + 1))
+fi
 require_file "patches-aosp/glodroid/bootloader/u-boot/0006-abootcmd-Trace-Android-partition-loading.patch" \
   "Bring-up images must expose the exact U-Boot partition-loading failure stage"
 require_file "patches-aosp/glodroid/configuration/0026-bootscript-Preserve-A-B-retries-during-bring-up.patch" \

@@ -8,8 +8,8 @@ Keep the compatibility helper local to Connectivity instead of depending
 on a hidden class from framework-wifi.
 ---
  framework/src/android/net/ConnectivityManager.java |  1 -
- framework/src/android/net/FakeWifi.java             | 63 +++++++++++++++++++++
- 2 files changed, 63 insertions(+), 1 deletion(-)
+ framework/src/android/net/FakeWifi.java             | 66 ++++++++++++++++++++++
+ 2 files changed, 66 insertions(+), 1 deletion(-)
  create mode 100644 framework/src/android/net/FakeWifi.java
 
 diff --git a/framework/src/android/net/ConnectivityManager.java b/framework/src/android/net/ConnectivityManager.java
@@ -28,7 +28,7 @@ new file mode 100644
 index 0000000..0000000
 --- /dev/null
 +++ b/framework/src/android/net/FakeWifi.java
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,66 @@
 +/*
 + * Copyright (C) 2026 The Tesla Android Project
 + * SPDX-License-Identifier: Apache-2.0
@@ -47,14 +47,17 @@ index 0000000..0000000
 +/**
 + * Connectivity-module side of the Wi-Fi compatibility shim.
 + *
-+ * This stays package-private so it does not become part of Android's API surface.
++ * This is public because jarjar relocates non-API classes away from ConnectivityManager's
++ * package. The class remains hidden from Android's API surface.
++ *
++ * @hide
 + */
-+final class FakeWifi {
++public final class FakeWifi {
 +    private static final String LOG_TAG = "FakeWifi";
 +
 +    private FakeWifi() {}
 +
-+    static boolean isHackEnabled(Context context) {
++    public static boolean isHackEnabled(Context context) {
 +        String packageName = context.getOpPackageName();
 +        boolean enabled = Arrays.stream(
 +                        SystemProperties.get("persist.waydroid.fake_wifi").split(","))
@@ -69,7 +72,7 @@ index 0000000..0000000
 +        return enabled;
 +    }
 +
-+    static NetworkInfo getFakeNetworkInfo() {
++    public static NetworkInfo getFakeNetworkInfo() {
 +        NetworkInfo networkInfo =
 +                new NetworkInfo(ConnectivityManager.TYPE_WIFI, 0, "WIFI", null);
 +        networkInfo.setDetailedState(NetworkInfo.DetailedState.CONNECTED, null, null);
@@ -83,7 +86,7 @@ index 0000000..0000000
 +        return networkInfo;
 +    }
 +
-+    static NetworkInfo maybeOverwrite(NetworkInfo network) {
++    public static NetworkInfo maybeOverwrite(NetworkInfo network) {
 +        if (network == null
 +                || network.getType() != ConnectivityManager.TYPE_WIFI
 +                || !network.isConnected()) {
