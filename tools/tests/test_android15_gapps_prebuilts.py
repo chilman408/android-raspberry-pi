@@ -10,6 +10,35 @@ import zipfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "tools" / "check-gapps-prebuilts.py"
+GAPPS_PATCH_DIR = REPO_ROOT / "patches-aosp" / "vendor" / "gapps"
+
+GAPPS_ANDROID_BP_FIXTURE = """\
+android_app_import {
+    name: "GmsCore",
+    owner: "gapps",
+    apk: "proprietary/product/priv-app/GmsCore/GmsCore.apk",
+    preprocessed: true,
+    presigned: true,
+    dex_preopt: {
+        enabled: false,
+    },
+    privileged: true,
+    product_specific: true,
+}
+
+android_app_import {
+    name: "Velvet",
+    owner: "gapps",
+    apk: "proprietary/product/priv-app/Velvet/Velvet.apk",
+    preprocessed: true,
+    presigned: true,
+    dex_preopt: {
+        enabled: false,
+    },
+    privileged: true,
+    product_specific: true,
+}
+"""
 
 
 class Android15GappsPrebuiltsTest(unittest.TestCase):
@@ -45,6 +74,31 @@ class Android15GappsPrebuiltsTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Git LFS pointer", result.stderr)
+
+    def test_gapps_patch_stack_keeps_default_soong_apk_validation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkout = pathlib.Path(temp_dir)
+            android_bp = checkout / "arm64" / "Android.bp"
+            android_bp.parent.mkdir(parents=True)
+            android_bp.write_text(GAPPS_ANDROID_BP_FIXTURE, encoding="utf-8")
+
+            for patch in sorted(GAPPS_PATCH_DIR.glob("*.patch")):
+                result = subprocess.run(
+                    ["git", "apply", str(patch)],
+                    cwd=checkout,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            patched_android_bp = android_bp.read_text(encoding="utf-8")
+
+        self.assertNotIn(
+            "skip_preprocessed_apk_checks: true",
+            patched_android_bp,
+            "Materialized GApps APKs must use Soong's default preprocessed APK validation.",
+        )
 
 
 if __name__ == "__main__":
