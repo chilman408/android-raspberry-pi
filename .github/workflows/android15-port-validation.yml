@@ -26,6 +26,9 @@ jobs:
       - name: Validate manifests and BSP migration
         run: bash tools/check-android15-port.sh
 
+      - name: Validate materialized GApps prebuilt guard
+        run: python3 -m unittest tools.tests.test_android15_gapps_prebuilts -v
+
   patches:
     name: Apply all Android 15 patch series
     needs: baseline

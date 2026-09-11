@@ -33,6 +33,15 @@ echo Sync repo tree
 pushd aosptree
 repo sync --no-clone-bundle --no-tags -j$(nproc --all) -v
 
+echo Materialize required GApps Git LFS objects
+GAPPS_DIR="${LOCAL_PATH}/aosptree/vendor/gapps"
+GAPPS_GMSCORE="arm64/proprietary/product/priv-app/GmsCore/GmsCore.apk"
+GAPPS_VELVET="arm64/proprietary/product/priv-app/Velvet/Velvet.apk"
+git -C "${GAPPS_DIR}" lfs pull --include="${GAPPS_GMSCORE},${GAPPS_VELVET}"
+python3 "${LOCAL_PATH}/tools/check-gapps-prebuilts.py" \
+    "${GAPPS_DIR}/${GAPPS_GMSCORE}" \
+    "${GAPPS_DIR}/${GAPPS_VELVET}"
+
 # Source checkout is retained between CI runs. Projects removed from the manifest
 # may remain on disk, and Soong scans every Android.bp it finds.
 AOSP_TREE=$(realpath .)
