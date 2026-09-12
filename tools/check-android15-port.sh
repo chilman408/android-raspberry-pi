@@ -55,6 +55,19 @@ require_match "manifests/glodroid.xml" 'revision="45f05f681224d88d1b170063001b59
   "Android 15 requires the maintained Raspberry Pi U-Boot baseline"
 require_match "manifests/tesla-android.xml" 'revision="c82b898997a47b699869e9650920eacecc4fd14d"' \
   "Android 15 requires the init_boot-capable GloDroid configuration"
+require_match "manifests/tesla-android.xml" 'path="vendor/tesla-android".*revision="6e139bf41585188308e053dcbb34855f644aedba"' \
+  "The image must ship the official TeslaAndroid 2026.22.1 vendor payload"
+require_file "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
+  "Expanded userdata must not starve Android with background inode-table writes"
+require_match "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
+  'BOARD_USERDATAIMAGE_EXTFS_INODE_COUNT := 512' \
+  "The userdata seed image must cap the expanded filesystem inode-table footprint"
+require_match "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
+  'noinit_itable' \
+  "The userdata mount must disable ext4 background inode-table initialization"
+require_match "patches-aosp/frameworks/av/0001-Audioflinger-add-audio-capture-via-tesla-android-aud.patch" \
+  'MSG_NOSIGNAL \| MSG_DONTWAIT' \
+  "Browser audio relay writes must not block the real-time AudioFlinger thread"
 require_file "patches-aosp/glodroid/configuration/0011-bootscript-Account-for-ab_select-command-u-boot-chan.patch" \
   "The boot script must use the current U-Boot A/B selection command"
 require_file "patches-aosp/glodroid/bootloader/u-boot/0002-abootcmd-Add-load-subcommand.patch" \
@@ -79,6 +92,9 @@ if ! python3 -m unittest -v tools/tests/test_android15_ih8sn_patch.py; then
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_android15_connectivity_fakewifi_patch.py; then
+  failures=$((failures + 1))
+fi
+if ! python3 -m unittest -v tools/tests/test_android15_runtime_performance.py; then
   failures=$((failures + 1))
 fi
 require_file "patches-aosp/glodroid/bootloader/u-boot/0006-abootcmd-Trace-Android-partition-loading.patch" \

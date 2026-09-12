@@ -6,7 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER = REPO_ROOT / "tools" / "android-build-cache.sh"
-BASELINE = "android-platform-15.0.0_r3-core-clean-v1"
+BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1"
 
 
 class RuntimeCacheTests(unittest.TestCase):
@@ -152,7 +152,7 @@ CHECKER = REPO_ROOT / "tools" / "check-android15-build-cache.py"
 
 VALID_WORKFLOW = """
 env:
-  ANDROID_BUILD_BASELINE: android-platform-15.0.0_r3-core-clean-v1
+  ANDROID_BUILD_BASELINE: android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1
 - name: Check out source
 - name: Prepare Android build cache
   run: bash tools/android-build-cache.sh prepare
@@ -209,7 +209,7 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_required_workflow_fragments_are_enforced(self):
         mutations = (
-            ("android-platform-15.0.0_r3-core-clean-v1", "wrong"),
+            ("android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1", "wrong"),
             ("run: bash tools/android-build-cache.sh prepare", "run: true"),
             ("required_disk_kib=$((150 * 1024 * 1024))", "required_disk_kib=1"),
             ("required_disk_kib=$((300 * 1024 * 1024))", "required_disk_kib=2"),
@@ -260,8 +260,8 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_declared_baseline_must_match_exactly(self):
         mutated = VALID_WORKFLOW.replace(
-            "android-platform-15.0.0_r3-core-clean-v1",
-            "android-platform-15.0.0_r3-core-clean-v1-wrong",
+            "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1",
+            "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1-wrong",
         )
         result = self.run_checker(mutated, VALID_HELPER)
         self.assertNotEqual(result.returncode, 0)

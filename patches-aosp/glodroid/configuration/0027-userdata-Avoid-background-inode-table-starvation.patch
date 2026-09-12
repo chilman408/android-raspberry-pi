@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tesla Android CI <ci@teslaandroid.local>
+Date: Sat, 12 Sep 2026 01:30:00 -0700
+Subject: [PATCH] userdata: avoid background inode-table starvation
+
+The 32 MiB userdata image is expanded to fill the target card at first
+boot.  With mke2fs defaults, resize2fs preserves 8192 inodes per block
+group and creates several GiB of inode tables on a 128 GB card.  The
+kernel then zeroes those tables in ext4lazyinit, saturating SD-card I/O
+and causing system_server, Settings, rendering, and input ANRs.
+
+Seed the small image with 512 inodes so the expanded filesystem still
+has more than 450k inodes while its inode tables stay below 256 MiB.
+Disable background table initialization; ext4 will initialize a group
+when it is needed instead of competing with Android's interactive boot.
+---
+ common/base/board.mk       | 4 ++++
+ platform/fstab/fstab.cpp  | 2 +-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/common/base/board.mk b/common/base/board.mk
+--- a/common/base/board.mk
++++ b/common/base/board.mk
+@@ -73,7 +73,11 @@ TARGET_USERIMAGES_USE_EXT4 := true
+ TARGET_USERIMAGES_USE_EXT4 := true
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
+ BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 33554432
++# resize2fs preserves the seed image's inodes-per-group ratio. Keep enough
++# inodes for an appliance while avoiding multi-GiB lazy inode-table writes.
++BOARD_USERDATAIMAGE_EXTFS_INODE_COUNT := 512
++
+ 
+ BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE := ext4
+ 
+diff --git a/platform/fstab/fstab.cpp b/platform/fstab/fstab.cpp
+--- a/platform/fstab/fstab.cpp
++++ b/platform/fstab/fstab.cpp
+@@ -23,7 +23,7 @@
+ // /dev/block/by-name/vendor_boot      /vendor_boot    emmc    defaults                              defaults,slotselect,avb=vendor_boot
+ 
+ /dev/block/by-name/metadata         /metadata       ext4    noatime,nosuid,nodev,discard,sync     wait,check,formattable,first_stage_mount
+-/dev/block/by-name/userdata         /data           ext4    noatime,nosuid,nodev,barrier=1        wait,check,latemount,quota,formattable,__FILE_ENCRYPT__,keydirectory=/metadata/vold/metadata_encryption
++/dev/block/by-name/userdata         /data           ext4    noatime,nosuid,nodev,barrier=1,noinit_itable wait,check,latemount,quota,formattable,__FILE_ENCRYPT__,keydirectory=/metadata/vold/metadata_encryption
+ 
+ // USB storage
+ #ifdef platform_broadcom
+-- 
+2.43.0

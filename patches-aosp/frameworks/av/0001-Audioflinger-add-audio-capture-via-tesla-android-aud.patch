@@ -7,9 +7,9 @@ Rebased for the Android 15 AudioFlinger thread layout.
 
 Change-Id: I58955528b2b4b5210a7f190bf79f5201276e227a
 ---
- services/audioflinger/Threads.cpp | 73 +++++++++++++++++++++++++++++++++
+ services/audioflinger/Threads.cpp | 92 ++++++++++++++++++++++++++++++++++++++++
  services/audioflinger/Threads.h   |  4 ++
- 2 files changed, 77 insertions(+)
+ 2 files changed, 96 insertions(+)
 
 diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
 --- a/services/audioflinger/Threads.cpp
@@ -46,7 +46,7 @@ diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.c
  
  // ----------------------------------------------------------------------------
  
-@@ -3573,13 +3580,64 @@
+@@ -3573,13 +3580,83 @@
                  ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
                  // The setprop command will not allow a property to be changed after
                  // the first time it is set, so we don't have to worry about un-muting.
@@ -83,14 +83,24 @@ diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.c
 +        return;
 +    }
 +
++    const int flags = TEMP_FAILURE_RETRY(fcntl(mWsFd, F_GETFL));
++    if (flags >= 0) {
++        TEMP_FAILURE_RETRY(fcntl(mWsFd, F_SETFL, flags | O_NONBLOCK));
++    }
++
 +    ALOGI("openWsSocket: connected to /dev/socket/ws_audio (fd=%d)", mWsFd);
 +}
 +
-+static bool writeAll(int fd, const void* buffer, size_t count) {
++static bool wsRelayEnabled() {
++    return property_get_bool("persist.tesla-android.browser_audio.is_enabled", true);
++}
++
++static bool sendAllNoSignal(int fd, const void* buffer, size_t count) {
 +    const auto* data = static_cast<const uint8_t*>(buffer);
 +    size_t remaining = count;
 +    while (remaining > 0) {
-+        const ssize_t written = TEMP_FAILURE_RETRY(write(fd, data, remaining));
++        const ssize_t written = TEMP_FAILURE_RETRY(
++                send(fd, data, remaining, MSG_NOSIGNAL | MSG_DONTWAIT));
 +        if (written <= 0) {
 +            return false;
 +        }
@@ -101,14 +111,23 @@ diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.c
 +}
 +
 +void PlaybackThread::sendToWsServer(const void* data, size_t bytes) {
-+    if (bytes == 0) return;
++    if (bytes == 0 || mType != MIXER) return;
++
++    if (!wsRelayEnabled()) {
++        if (mWsFd >= 0) {
++            close(mWsFd);
++            mWsFd = -1;
++        }
++        return;
++    }
++
 +    if (mWsFd < 0) openWsSocket();
 +    if (mWsFd < 0) return;
 +
 +    const uint32_t length = htonl(static_cast<uint32_t>(bytes));
-+    if (!writeAll(mWsFd, &length, sizeof(length)) ||
-+            !writeAll(mWsFd, data, bytes)) {
-+        ALOGW("sendToWsServer: write failed: %s", strerror(errno));
++    if (!sendAllNoSignal(mWsFd, &length, sizeof(length)) ||
++            !sendAllNoSignal(mWsFd, data, bytes)) {
++        ALOGW("sendToWsServer: failed to write payload: %s", strerror(errno));
 +        close(mWsFd);
 +        mWsFd = -1;
 +    }
@@ -118,7 +137,7 @@ diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.c
  ssize_t PlaybackThread::threadLoop_write()
  {
      LOG_HIST_TS();
-@@ -3609,10 +3667,11 @@
+@@ -3609,10 +3686,11 @@
          if (framesWritten > 0) {
              bytesWritten = framesWritten * mFrameSize;
  

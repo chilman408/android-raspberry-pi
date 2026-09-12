@@ -30,7 +30,7 @@ jobs:
       - android-build
     timeout-minutes: 720
     env:
-      ANDROID_BUILD_BASELINE: android-platform-15.0.0_r3-core-clean-v1
+      ANDROID_BUILD_BASELINE: android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1
       TA_RELEASEKEY_PK8_B64: ${{ secrets.TA_RELEASEKEY_PK8_B64 }}
       TA_RELEASEKEY_X509_B64: ${{ secrets.TA_RELEASEKEY_X509_B64 }}
       TA_PLATFORM_PK8_B64: ${{ secrets.TA_PLATFORM_PK8_B64 }}
