@@ -1,7 +1,7 @@
 # Android 15 Apple TV playback compatibility design
 
 **Date:** 2026-09-13
-**Status:** Approved experiment design; awaiting written-spec review
+**Status:** Approved
 **Target branch:** `android-15-bringup`
 
 ## Context

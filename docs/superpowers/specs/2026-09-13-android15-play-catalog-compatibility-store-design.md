@@ -1,7 +1,7 @@
 # Android 15 Play catalog compatibility store design
 
 **Date:** 2026-09-13
-**Status:** Approved design; awaiting written-spec review
+**Status:** Approved
 **Target branch:** `android-15-bringup`
 
 ## Context
