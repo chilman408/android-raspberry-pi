@@ -1,7 +1,7 @@
 # Android 15 Runtime Domain and TLS Management Design
 
 **Date:** 2026-09-13
-**Status:** Approved in chat; pending written-spec review
+**Status:** Approved for implementation planning
 **Target branch:** `android-15-bringup`
 
 ## Context
