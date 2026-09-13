@@ -3,7 +3,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1"
+BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v3"
 HELPER_REQUIREMENTS = {
     "normalized workspace": 'realpath -m -- "$workspace_input"',
     "source-tree symlink guard": '-L "$aosptree_root"',

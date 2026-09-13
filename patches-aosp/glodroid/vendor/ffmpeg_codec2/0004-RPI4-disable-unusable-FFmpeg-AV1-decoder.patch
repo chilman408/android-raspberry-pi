@@ -1,0 +1,53 @@
+From 1f1f48bf2bb00b8fe0952adeba0070d6c1a2f9bd Mon Sep 17 00:00:00 2001
+From: Hilman <chilman408@users.noreply.github.com>
+Date: Sat, 12 Sep 2026 13:40:00 -0700
+Subject: [PATCH 4/4] ffmpeg_codec2: allow device-specific AV1 rank override
+
+The FFmpeg build used by RPi4 intentionally omits libdav1d, and the
+Raspberry Pi 4 has no AV1 hardware decoder.  The native FFmpeg AV1
+decoder is hardware-only, so advertising it causes Netflix to select it
+and spin forever while every input buffer fails with ENOSYS.
+
+Allow the device configuration to disable just the FFmpeg AV1 component
+by assigning it the standard disabled rank.  Other FFmpeg video codecs
+retain their existing rank and hardware paths.
+
+Signed-off-by: Hilman <chilman408@users.noreply.github.com>
+---
+ service.cpp | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/service.cpp b/service.cpp
+index 5868a4fca..8771973ef 100644
+--- a/service.cpp
++++ b/service.cpp
+@@ -138,6 +138,7 @@ public:
+         uint32_t defaultRank = ::android::base::GetUintProperty("persist.ffmpeg_codec2.rank", 0x110u);
+         uint32_t defaultRankAudio = ::android::base::GetUintProperty("persist.ffmpeg_codec2.rank.audio", defaultRank);
+         uint32_t defaultRankVideo = ::android::base::GetUintProperty("persist.ffmpeg_codec2.rank.video", defaultRank);
++        uint32_t av1Rank = ::android::base::GetUintProperty("ro.vendor.ffmpeg_codec2.rank.video.av1", defaultRankVideo);
+         ALOGD("listComponents: defaultRank=%x, defaultRankAudio=%x, defaultRankVideo=%x",
+               defaultRank, defaultRankAudio, defaultRankVideo);
+ #define RANK_DISABLED 0xFFFFFFFF
+@@ -157,12 +158,16 @@ public:
+             }
+             if (defaultRankVideo != RANK_DISABLED) {
+                 for (int i = 0; i < kNumVideoComponents; i++) {
++                    const auto& info = kFFMPEGVideoComponents[i];
++                    if (info.codecID == AV_CODEC_ID_AV1 && av1Rank == RANK_DISABLED) {
++                        continue;
++                    }
+                     auto traits = std::make_shared<C2Component::Traits>();
+-                    traits->name = kFFMPEGVideoComponents[i].name;
++                    traits->name = info.name;
+                     traits->domain = C2Component::DOMAIN_VIDEO;
+                     traits->kind = C2Component::KIND_DECODER;
+-                    traits->mediaType = kFFMPEGVideoComponents[i].mediaType;
+-                    traits->rank = defaultRankVideo;
++                    traits->mediaType = info.mediaType;
++                    traits->rank = (info.codecID == AV_CODEC_ID_AV1) ? av1Rank : defaultRankVideo;
+                     ret.push_back(traits);
+                 }
+             }
+--
+2.51.0.windows.1

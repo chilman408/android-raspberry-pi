@@ -56,6 +56,13 @@ PRODUCT_VENDOR_PROPERTIES += \
     persist.ffmpeg_codec2.v4l2.h265=true \
     persist.ffmpeg_codec2.rank.audio=16 \
     persist.ffmpeg_codec2.rank.video=128 \
+    ro.vendor.ffmpeg_codec2.rank.video.av1=4294967295 \
+
+# Input compatibility
+# A touchscreen is a superset of Android's basic "fake touch" capability.
+# Advertise both so Google Play does not reject ordinary touch applications.
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.hardware.faketouch.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.faketouch.xml \
 
 # Vulkan
 PRODUCT_PACKAGES += \

@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 TESLA_ANDROID_2026_22_1_VENDOR = "6e139bf41585188308e053dcbb34855f644aedba"
-RUNTIME_BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v1"
+RUNTIME_BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v3"
 USERDATA_PATCH = (
     REPO_ROOT
     / "patches-aosp"
@@ -23,6 +23,22 @@ AUDIO_PATCH = (
     / "frameworks"
     / "av"
     / "0001-Audioflinger-add-audio-capture-via-tesla-android-aud.patch"
+)
+FFMPEG_CODEC_PATCH = (
+    REPO_ROOT
+    / "patches-aosp"
+    / "glodroid"
+    / "vendor"
+    / "ffmpeg_codec2"
+    / "0004-RPI4-disable-unusable-FFmpeg-AV1-decoder.patch"
+)
+RPI4_DEVICE_MK = (
+    REPO_ROOT
+    / "aosptree"
+    / "vendor"
+    / "devices-community"
+    / "gd_rpi4"
+    / "device.mk"
 )
 
 
@@ -85,6 +101,44 @@ class Android15RuntimePerformanceTest(unittest.TestCase):
             "TEMP_FAILURE_RETRY(write(fd, data, remaining))",
             patch,
             "the real-time AudioFlinger thread must never use blocking relay writes",
+        )
+
+    def test_rpi4_does_not_offer_netflix_the_unusable_ffmpeg_av1_decoder(self):
+        self.assertTrue(
+            FFMPEG_CODEC_PATCH.is_file(),
+            f"missing Netflix AV1 codec policy patch: {FFMPEG_CODEC_PATCH}",
+        )
+        patch = FFMPEG_CODEC_PATCH.read_text(encoding="utf-8")
+        device = RPI4_DEVICE_MK.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "ro.vendor.ffmpeg_codec2.rank.video.av1=4294967295",
+            device,
+            "RPi4 must disable only the unusable FFmpeg AV1 component",
+        )
+        self.assertIn(
+            'GetUintProperty("ro.vendor.ffmpeg_codec2.rank.video.av1", defaultRankVideo)',
+            patch,
+            "the Codec2 store must support a device-specific AV1 rank override",
+        )
+        self.assertIn(
+            "if (info.codecID == AV_CODEC_ID_AV1 && av1Rank == RANK_DISABLED)",
+            patch,
+            "the disabled AV1 component must be omitted from the published codec list",
+        )
+        self.assertIn(
+            "traits->rank = (info.codecID == AV_CODEC_ID_AV1) ? av1Rank : defaultRankVideo;",
+            patch,
+            "non-AV1 FFmpeg video codec ranks must remain unchanged",
+        )
+
+    def test_rpi4_touchscreen_also_advertises_basic_touch_compatibility(self):
+        device = RPI4_DEVICE_MK.read_text(encoding="utf-8")
+        self.assertIn(
+            "frameworks/native/data/etc/android.hardware.faketouch.xml:"
+            "$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.faketouch.xml",
+            device,
+            "touchscreen devices must also report android.hardware.faketouch",
         )
 
     def test_release_runtime_change_invalidates_cached_build_outputs(self):
