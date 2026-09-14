@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Pure evidence parsing for the Apple TV codec playback probe."""
+"""Evidence parsing and a guarded, reversible Apple TV AVC playback experiment."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+import argparse
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import re
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
 from typing import Sequence
+import xml.etree.ElementTree as ET
 
 
 APPLE_TV_PACKAGE = "com.apple.atve.androidtv.appletv"
@@ -333,10 +343,493 @@ def redact_diagnostic_text(text: str) -> str:
     return _redact_sensitive_fields(text)
 
 
-def main() -> int:
-    """Task 1 deliberately exposes no orchestration commands."""
-    print("usage: apple_tv_codec_probe.py <command>")
-    return 2
+TARGET_PRODUCT = "tesla_android_rpi4"
+TARGET_DEVICE = "gd_rpi4"
+HARDWARE_AVC_DECODER = "c2.v4l2.avc.decoder"
+PROBE_PROPERTIES = {
+    "persist.ffmpeg_codec2.v4l2.h264": "false",
+    "persist.ffmpeg_codec2.rank.video": "16",
+}
+PROPERTY_PREFIXES = ("persist.ffmpeg_codec2.", "ro.vendor.v4l2_codec2.", "ro.vendor.ffmpeg_codec2.")
+
+
+class ProbeError(RuntimeError):
+    """A bounded device operation or a safety precondition failed."""
+
+
+class RestoreError(ProbeError):
+    def __init__(self, message, expected, observed):
+        super().__init__(message)
+        self.expected = expected
+        self.observed = observed
+
+
+@dataclass(frozen=True)
+class ProbeState:
+    serial: str
+    product: str
+    device: str
+    boot_id: str
+    properties: dict[str, PropertyState]
+    captured_at: str
+
+    def to_dict(self):
+        return {"version": 1, **asdict(self)}
+
+
+class AdbClient:
+    def __init__(self, serial: str, runner=subprocess.run):
+        if not serial or serial.startswith("-") or any(c.isspace() for c in serial):
+            raise ProbeError("an explicit valid ADB serial is required")
+        self._serial = serial
+        self.runner = runner
+
+    @property
+    def serial(self):
+        return self._serial
+
+    def _execute(self, command, timeout_seconds):
+        try:
+            result = self.runner(command, text=True, capture_output=True,
+                                 timeout=timeout_seconds, check=False)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            # Exception command/stdout/stderr may include sensitive payloads.
+            raise ProbeError(f"ADB operation failed: {type(exc).__name__}") from exc
+        if result.returncode:
+            raise ProbeError(f"ADB operation exited {result.returncode}: " + redact_diagnostic_text(result.stderr))
+        return result.stdout
+
+    def run(self, *args, timeout_seconds=30):
+        return self._execute(["adb", "-s", self.serial, *args], timeout_seconds)
+
+    def shell(self, *args, timeout_seconds=30):
+        # adb joins shell arguments on the remote side; quote every token there.
+        return self.run("shell", *(shlex.quote(arg) for arg in args), timeout_seconds=timeout_seconds)
+
+    def list_devices(self):
+        text = self._execute(["adb", "devices", "-l"], 30)
+        return [(parts[0], parts[1]) for line in text.splitlines()
+                if len(parts := line.split()) >= 2 and not line.startswith(("List ", "*"))]
+
+    def root(self):
+        self.run("root")
+        self.run("wait-for-device", timeout_seconds=60)
+        if self.shell("id", "-u").strip() != "0":
+            raise ProbeError("ADB root was not granted")
+
+    def reboot(self):
+        self.run("reboot")
+
+    def wait_for_boot(self, timeout_seconds=180):
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                remaining = max(0.01, min(10, deadline - time.monotonic()))
+                if self.shell("getprop", "sys.boot_completed", timeout_seconds=remaining).strip() == "1":
+                    remaining = max(0.01, min(10, deadline - time.monotonic()))
+                    packages = self.shell("cmd", "package", "list", "packages", APPLE_TV_PACKAGE, timeout_seconds=remaining)
+                    if f"package:{APPLE_TV_PACKAGE}" in packages:
+                        return
+            except ProbeError:
+                pass
+            time.sleep(min(2, max(0, deadline - time.monotonic())))
+        raise ProbeError("same-serial boot/package-manager readiness timed out")
+
+
+def guard_target(client, state=None):
+    connected = [serial for serial, status in client.list_devices() if status == "device"]
+    if connected != [client.serial]:
+        raise ProbeError("require exactly one online device matching the explicit serial")
+    product = client.shell("getprop", "ro.product.name").strip()
+    device = client.shell("getprop", "ro.product.device").strip()
+    if product != TARGET_PRODUCT or device != TARGET_DEVICE:
+        raise ProbeError("target product/device does not match the Raspberry Pi image")
+    if state and (state.serial != client.serial or state.product != product or state.device != device):
+        raise ProbeError("saved target identity does not match connected target")
+    boot_id = client.shell("cat", "/proc/sys/kernel/random/boot_id").strip()
+    if not boot_id:
+        raise ProbeError("target boot ID is missing")
+    return product, device, boot_id
+
+
+def prepare_output(output_dir):
+    output_dir = Path(output_dir).absolute()
+    for part in (output_dir, *output_dir.parents):
+        if part.is_symlink():
+            raise ProbeError("output path must not contain a symlink")
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ProbeError("output path is not a directory")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def write_evidence(output_dir, name, text):
+    _atomic_write(output_dir, name, redact_diagnostic_text(text))
+
+
+def _atomic_write(output_dir, name, text):
+    directory = prepare_output(output_dir)
+    if Path(name).name != name or (directory / name).is_symlink():
+        raise ProbeError("unsafe evidence filename")
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            stream.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary, directory / name)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_json(output_dir, name, value):
+    # Redact individual string values before encoding to keep valid JSON.
+    def sanitized(item):
+        if isinstance(item, str):
+            return redact_diagnostic_text(item)
+        if isinstance(item, dict):
+            return {key: sanitized(val) for key, val in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [sanitized(val) for val in item]
+        return item
+    _atomic_write(output_dir, name, json.dumps(sanitized(value), indent=2) + "\n")
+
+
+def diagnostic_lines(text):
+    """Persist only codec/process/load diagnostics, never complete service logs."""
+    return "\n".join(line for line in text.splitlines() if re.search(
+        r"c2\.|OMX\.|MediaCodec|MediaMetrics|CCodec|video/avc|" + re.escape(APPLE_TV_PACKAGE) +
+        r"|FATAL EXCEPTION|Thermal Status|Temperature\{|\bcpu\s*=|\bthermal\s*=", line))
+
+
+def capture_baseline(client: AdbClient, output_dir: Path) -> ProbeState:
+    output_dir = prepare_output(output_dir)
+    if (output_dir / "state.json").exists():
+        raise ProbeError("state.json already exists; use a fresh evidence directory")
+    product, device, boot_id = guard_target(client)
+    listing = parse_getprop_listing(client.shell("getprop"))
+    properties = {name: value for name, value in listing.items() if name.startswith(PROPERTY_PREFIXES)}
+    for name in PROBE_PROPERTIES:
+        properties.setdefault(name, PropertyState(name, False, ""))
+    state = ProbeState(client.serial, product, device, boot_id, properties, datetime.now(timezone.utc).isoformat())
+    write_json(output_dir, "state.json", state.to_dict())
+    player = client.shell("dumpsys", "media.player")
+    drm = client.shell("dumpsys", "media.drm")
+    metadata = {key: listing[key].value if key in listing else None for key in (
+        "ro.product.model", "ro.build.fingerprint", "ro.build.type", "ro.boot.verifiedbootstate")}
+    metadata["avc_components"] = [c for c in parse_codec_inventory(player) if ".avc." in c]
+    metadata["codec_rank_lines"] = [line for line in player.splitlines() if re.search(r"\brank\b", line, re.I)]
+    metadata["codec_ranks"] = {}
+    for line in player.splitlines():
+        component = _COMPONENT.search(line)
+        rank = re.search(r"\brank\s*[:=]\s*(\d+)", line, re.I)
+        if component and rank:
+            metadata["codec_ranks"][component.group(1)] = int(rank.group(1))
+    metadata["widevine"] = parse_widevine_state(drm)
+    write_json(output_dir, "baseline.json", metadata)
+    write_evidence(output_dir, "codec-properties.txt", "\n".join(f"[{p.name}]: [{p.value}]" for p in properties.values() if p.present))
+    write_evidence(output_dir, "media-player.txt", diagnostic_lines(player))
+    for package, filename in ((APPLE_TV_PACKAGE, "apple-version.txt"), ("com.netflix.ninja", "netflix-version.txt")):
+        package_dump = client.shell("dumpsys", "package", package)
+        write_evidence(output_dir, filename, "\n".join(line for line in package_dump.splitlines() if re.search(r"\bversion(?:Code|Name)=", line)))
+    for name, command in (
+        ("metrics", ("dumpsys", "media.metrics")),
+        ("processes", ("dumpsys", "activity", "processes")),
+        ("cpu", ("top", "-b", "-n", "1")),
+        ("thermal", ("dumpsys", "thermalservice")),
+    ):
+        write_evidence(output_dir, f"baseline-{name}.txt", diagnostic_lines(client.shell(*command)))
+    write_evidence(output_dir, "baseline-codec-log.txt", diagnostic_lines(read_codec_evidence(client)))
+    return state
+
+
+def require_restorable_target_properties(state):
+    for name in PROBE_PROPERTIES:
+        prop = state.properties.get(name)
+        if prop is None or not prop.present:
+            raise ProbeError(f"cannot restore absent persistent property: {name}")
+        if REDACTED in prop.value or redact_diagnostic_text(prop.value) != prop.value:
+            raise ProbeError(f"cannot safely persist an exact recovery value: {name}")
+
+
+def apply_software_avc_probe(client: AdbClient, state: ProbeState) -> None:
+    require_restorable_target_properties(state)
+    guard_target(client, state)
+    for name, value in PROBE_PROPERTIES.items():
+        client.shell("setprop", name, value)
+
+
+def verify_probe_properties(client):
+    for name, expected in PROBE_PROPERTIES.items():
+        if client.shell("getprop", name).rstrip("\r\n") != expected:
+            raise ProbeError(f"probe property verification failed: {name}")
+
+
+def restore_probe_state(client: AdbClient, state: ProbeState) -> None:
+    require_restorable_target_properties(state)
+    expected = {name: state.properties[name].value for name in PROBE_PROPERTIES}
+    observed = {name: None for name in PROBE_PROPERTIES}
+    errors = []
+    try:
+        guard_target(client, state)
+        client.root()
+        # Attempt both writes even if one fails, then verify actual device state.
+        for name, value in expected.items():
+            try:
+                client.shell("setprop", name, value)
+            except ProbeError as exc:
+                errors.append(str(exc))
+        try:
+            client.reboot()
+            client.wait_for_boot()
+        except ProbeError as exc:
+            errors.append(str(exc))
+        # A listing distinguishes an absent property from a present empty value.
+        restored = parse_getprop_listing(client.shell("getprop"))
+        observed.update({name: restored[name].value if name in restored else None for name in expected})
+        if HARDWARE_AVC_DECODER not in parse_codec_inventory(client.shell("dumpsys", "media.player")):
+            errors.append("restored hardware AVC component is not advertised")
+    except ProbeError as exc:
+        errors.append(str(exc))
+    if errors or observed != expected:
+        raise RestoreError("; ".join(errors) or "restored property values differ", expected, observed)
+
+
+def read_codec_evidence(client):
+    metrics = client.shell("dumpsys", "media.metrics", timeout_seconds=1)
+    logs = client.shell("logcat", "-d", "-v", "monotonic", "-s", "MediaMetrics:I", "MediaCodec:I", "CCodec:I", "AndroidRuntime:E", "ActivityManager:I", "*:S", timeout_seconds=1)
+    return metrics + "\n" + logs
+
+
+def safe_play_tap(client, ui):
+    try:
+        start = ui.index("<hierarchy")
+        end = ui.index("</hierarchy>", start) + len("</hierarchy>")
+        root = ET.fromstring(ui[start:end])
+    except (ValueError, ET.ParseError):
+        return
+    if any(node.get("package") not in (None, "", APPLE_TV_PACKAGE) for node in root.iter("node")):
+        return
+    focused = [node for node in root.iter("node") if node.get("focused") == "true" and node.get("enabled") == "true"]
+    if len(focused) != 1:
+        return
+    node = focused[0]
+    if node.get("package") != APPLE_TV_PACKAGE:
+        return
+    if (node.get("text") or node.get("content-desc") or "").strip().casefold() not in {"play", "resume", "retry", "watch now"}:
+        return
+    bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+    if bounds:
+        left, top, right, bottom = map(int, bounds.groups())
+        if right > left and bottom > top:
+            client.shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+
+
+def cpu_percentages(text):
+    column = None
+    values = []
+    for line in text.splitlines():
+        cells = line.split()
+        if "%CPU" in cells:
+            column = cells.index("%CPU")
+        elif APPLE_TV_PACKAGE in line:
+            if column is not None and len(cells) > column:
+                try:
+                    values.append(float(cells[column].rstrip("%")))
+                except ValueError:
+                    pass
+            else:
+                values.extend(float(value) for value in re.findall(r"(\d+(?:\.\d+)?)%", line))
+    return values
+
+
+def run_playback_observation(client, output_dir, duration_seconds, *, read_only=False):
+    if not read_only:
+        client.shell("logcat", "-c")
+    # Ignore historical snapshots; repeated dumps must not manufacture restarts.
+    seen = {event_key(event) for event in parse_codec_events(read_codec_evidence(client))}
+    client.shell("am", "start", "-n", APPLE_TV_PACKAGE + "/com.apple.android.tv.MainActivity")
+    started = time.monotonic()
+    try:
+        ui = client.shell("uiautomator", "dump", "/dev/tty", timeout_seconds=5)
+    except ProbeError:
+        ui = ""  # Unsafe/unavailable controls mean no input, not a guessed tap.
+    initial = read_codec_evidence(client)
+    if not any(event_key(event) not in seen for event in parse_codec_events(initial)):
+        safe_play_tap(client, ui)
+    events, samples, evidence = [], [], []
+    first_event_at = None
+    last_progress_at = started
+    last_stamp = None
+    severe_since = None
+    load_reason = None
+    current = initial
+    while True:
+        now = time.monotonic()
+        for event in parse_codec_events(current):
+            key = event_key(event)
+            if key not in seen:
+                seen.add(key)
+                events.append(event)
+                if first_event_at is None and now - started <= 60 and (read_only or event.codec == SOFTWARE_AVC_DECODER):
+                    first_event_at = now
+                if event.event == "sample" and (last_stamp is None or event.timestamp > last_stamp):
+                    last_stamp = event.timestamp
+                    last_progress_at = now
+        evidence.append(diagnostic_lines(current))
+        try:
+            pid = client.shell("pidof", APPLE_TV_PACKAGE, timeout_seconds=1).strip()
+        except ProbeError:
+            pid = ""
+        cpu = client.shell("top", "-b", "-n", "1", timeout_seconds=1)
+        thermal = client.shell("dumpsys", "thermalservice", timeout_seconds=1)
+        process = client.shell("dumpsys", "activity", "processes", timeout_seconds=1)
+        status_match = re.search(r"Thermal Status:\s*(\d+)", thermal, re.I)
+        status = int(status_match.group(1)) if status_match else None
+        samples.append({"elapsed_seconds": now - started, "pid": pid,
+                        "thermal_status": status,
+                        "temperatures_c": [float(v) for v in re.findall(r"mValue=(-?\d+(?:\.\d+)?)", thermal)],
+                        "cpu_percent": cpu_percentages(cpu)})
+        evidence.extend(diagnostic_lines(text) for text in (cpu, thermal, process))
+        if status is not None and status >= 3:
+            if severe_since is None:
+                severe_since = now
+        else:
+            severe_since = None
+        if events and not pid:
+            load_reason = "Apple process died during encrypted AVC playback"
+        elif severe_since is not None and now - severe_since >= 20:
+            load_reason = "thermal severe/critical state sustained for 20 seconds"
+        elif first_event_at is not None and now - last_progress_at >= 30:
+            load_reason = "no advancing codec progress for 30 seconds"
+        if load_reason or (first_event_at is None and now - started >= 60):
+            break
+        if first_event_at is not None and now - first_event_at >= duration_seconds:
+            break
+        # Reserve two one-second command budgets for the next codec snapshot.
+        time.sleep(max(0, now + 8 - time.monotonic()))
+        current = read_codec_evidence(client)
+    observation = classify_observation(events, required_seconds=duration_seconds)
+    if first_event_at is None:
+        observation = PlaybackObservation(ProbeOutcome.NO_ENCRYPTED_AVC, None, 0, 0, "no matching encrypted AVC event within 60 seconds")
+    elif load_reason:
+        observation = PlaybackObservation(ProbeOutcome.UNUSABLE_LOAD, observation.codec, observation.continuous_seconds, observation.restart_count, load_reason)
+    write_evidence(output_dir, "playback.txt", "\n".join(evidence))
+    write_json(output_dir, "events.json", [asdict(event) for event in events])
+    # No screenshot: a UI hierarchy cannot prove that a frame contains no private overlay.
+    return observation, samples
+
+
+def event_key(event):
+    return (event.timestamp, event.package, event.mime, event.codec, event.encrypted, event.event, event.session_id)
+
+
+def write_result(output_dir, state, observation, samples=(), *, duration_seconds=600, mode="probe"):
+    write_json(output_dir, "result.json", {"version": 1, "serial": state.serial,
+               "requested_duration_seconds": duration_seconds, "mode": mode,
+               "observation": asdict(observation), "samples": samples, "screenshot": "omitted: privacy cannot be established"})
+
+
+def run_probe(client, output_dir, duration_seconds):
+    state = capture_baseline(client, output_dir)
+    mutated = False
+    try:
+        require_restorable_target_properties(state)
+        guard_target(client, state)
+        client.root()
+        # A failed/uncertain write may already have changed the target.
+        mutated = True
+        apply_software_avc_probe(client, state)
+        client.reboot()
+        client.wait_for_boot()
+        verify_probe_properties(client)
+        if SOFTWARE_AVC_DECODER not in parse_codec_inventory(client.shell("dumpsys", "media.player")):
+            observation = PlaybackObservation(ProbeOutcome.NO_SOFTWARE_DECODER, None, 0, 0, "software AVC is not advertised")
+            write_result(output_dir, state, observation, duration_seconds=duration_seconds)
+        else:
+            observation, samples = run_playback_observation(client, output_dir, duration_seconds)
+            write_result(output_dir, state, observation, samples, duration_seconds=duration_seconds)
+    except (Exception, KeyboardInterrupt) as exc:
+        write_result(output_dir, state, PlaybackObservation(ProbeOutcome.HARNESS_ERROR, None, 0, 0, f"{type(exc).__name__}: {exc}"), duration_seconds=duration_seconds)
+        raise
+    finally:
+        if mutated:
+            try:
+                restore_probe_state(client, state)
+            except RestoreError as exc:
+                write_json(output_dir, "RESTORE_FAILED.json", {"expected": exc.expected, "observed": exc.observed, "error": str(exc)})
+                raise
+
+
+def load_state(path):
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1:
+        raise ProbeError("unsupported state schema/version")
+    required = ("serial", "product", "device", "boot_id", "captured_at")
+    if not all(isinstance(data.get(name), str) and data[name] for name in required):
+        raise ProbeError("invalid saved identity")
+    if data["product"] != TARGET_PRODUCT or data["device"] != TARGET_DEVICE:
+        raise ProbeError("saved state is not for the required product/device")
+    properties = data.get("properties")
+    if not isinstance(properties, dict):
+        raise ProbeError("invalid saved properties")
+    parsed = {}
+    for name, prop in properties.items():
+        if (not name.startswith(PROPERTY_PREFIXES) or not isinstance(prop, dict)
+                or prop.get("name") != name or type(prop.get("present")) is not bool
+                or not isinstance(prop.get("value"), str) or "\x00" in prop["value"]):
+            raise ProbeError("invalid saved property")
+        parsed[name] = PropertyState(name, prop["present"], prop["value"])
+    state = ProbeState(*(data[key] for key in required[:4]), parsed, data["captured_at"])
+    require_restorable_target_properties(state)
+    return state
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Reversible Apple TV AVC experiment; use a fresh evidence directory")
+    commands = parser.add_subparsers(dest="action", required=True)
+    for action in ("baseline", "probe", "observe", "restore"):
+        command = commands.add_parser(action)
+        command.add_argument("--serial", required=True)
+        if action == "restore":
+            command.add_argument("--state", required=True, type=Path)
+        else:
+            command.add_argument("--output", required=True, type=Path)
+        if action in ("probe", "observe"):
+            command.add_argument("--duration-seconds", type=int, default=600 if action == "probe" else 90)
+    args = parser.parse_args(argv)
+    try:
+        if hasattr(args, "duration_seconds") and args.duration_seconds <= 0:
+            raise ProbeError("duration must be positive")
+        client = AdbClient(args.serial, runner=subprocess.run)
+        if args.action == "restore":
+            state = load_state(args.state)
+            try:
+                restore_probe_state(client, state)
+            except RestoreError as exc:
+                write_json(args.state.parent, "RESTORE_FAILED.json", {"expected": exc.expected, "observed": exc.observed, "error": str(exc)})
+                raise
+        elif args.action == "baseline":
+            capture_baseline(client, args.output)
+        elif args.action == "observe":
+            state = capture_baseline(client, args.output)
+            try:
+                observation, samples = run_playback_observation(client, args.output, args.duration_seconds, read_only=True)
+                write_result(args.output, state, observation, samples, duration_seconds=args.duration_seconds, mode="observe")
+            except (Exception, KeyboardInterrupt) as exc:
+                write_result(args.output, state, PlaybackObservation(ProbeOutcome.HARNESS_ERROR, None, 0, 0, f"{type(exc).__name__}: {exc}"), duration_seconds=args.duration_seconds, mode="observe")
+                raise
+        else:
+            run_probe(client, args.output, args.duration_seconds)
+        return 0
+    except (ProbeError, OSError, ValueError, KeyboardInterrupt) as exc:
+        print(redact_diagnostic_text(f"{type(exc).__name__}: {exc}"), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
