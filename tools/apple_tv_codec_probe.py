@@ -8,6 +8,7 @@ import argparse
 from datetime import datetime, timezone
 from enum import Enum
 import json
+import math
 import re
 import os
 from pathlib import Path
@@ -41,6 +42,7 @@ class CodecEvent:
     encrypted: bool
     event: str
     session_id: str = field(default="", compare=False, repr=False)
+    position_seconds: float | None = None
 
 
 class ProbeOutcome(str, Enum):
@@ -59,6 +61,7 @@ class PlaybackObservation:
     continuous_seconds: float
     restart_count: int
     reason: str
+    media_progress_seconds: float = 0.0
 
 
 _GETPROP_LINE = re.compile(r"^\s*\[([^\]]+)\]:\s*\[([^\]]*)\]\s*$")
@@ -158,9 +161,64 @@ def parse_codec_events(text: str) -> list[CodecEvent]:
                 encrypted=True,
                 event=event,
                 session_id=fields.get("session", ""),
+                position_seconds=_explicit_position(fields.get("position_seconds")),
             )
         )
     return events
+
+
+def _explicit_position(value):
+    """Accept only the normalized counter, never infer progress from timestamps."""
+    if value is None or not re.fullmatch(r"\d+(?:\.\d+)?", value):
+        return None
+    position = float(value)
+    return position if math.isfinite(position) else None
+
+
+class _MediaProgress:
+    """Validated contiguous progress per explicit codec/session identity.
+
+    At most 15 seconds may separate samples, allowing margin over 10s polling.
+    Each media delta must be 90%-110% of elapsed event time. Missing counters,
+    stalls, seeks, resets and gaps break the proven span instead of being joined.
+    """
+    def __init__(self):
+        self.active = {}
+        self.best = {}
+
+    def add(self, event):
+        if (event.package != APPLE_TV_PACKAGE or event.mime != "video/avc"
+                or not event.encrypted or not event.session_id):
+            return False
+        key = (event.codec, event.session_id)
+        position = event.position_seconds
+        if position is not None and (not math.isfinite(position) or position < 0):
+            position = None
+        if event.event == "start":
+            self.active[key] = (event.timestamp, position, 0.0, 0.0)
+            return False
+        if event.event == "stop":
+            self.active.pop(key, None)
+            return False
+        if event.event != "sample" or key not in self.active:
+            return False
+        stamp, previous, elapsed_span, media_span = self.active[key]
+        elapsed = event.timestamp - stamp
+        delta = position - previous if position is not None and previous is not None else None
+        progressing = (delta is not None and 0 < elapsed <= 15
+                       and 0.9 <= delta / elapsed <= 1.1)
+        if progressing:
+            elapsed_span += elapsed
+            media_span += delta
+            self.best[key] = max(self.best.get(key, 0.0), min(elapsed_span, media_span))
+        else:
+            elapsed_span = media_span = 0.0
+        self.active[key] = (event.timestamp, position, elapsed_span, media_span)
+        return progressing
+
+    def seconds(self, codec):
+        return max((seconds for (component, _session), seconds in self.best.items()
+                    if component == codec), default=0.0)
 
 
 def _closed_sessions(
@@ -241,20 +299,26 @@ def classify_observation(
     software_codec, software_duration, software_sampled = max(
         software_sessions, key=lambda item: item[1]
     )
-    if software_duration >= required_seconds and software_sampled:
+    progress = _MediaProgress()
+    for event in sorted(encrypted_events, key=lambda item: item.timestamp):
+        progress.add(event)
+    media_seconds = progress.seconds(SOFTWARE_AVC_DECODER)
+    if media_seconds >= max(600, required_seconds) and software_sampled:
         return PlaybackObservation(
             ProbeOutcome.PLAYED_600_SECONDS,
             software_codec,
             software_duration,
             0,
-            "one uninterrupted software AVC session met the duration requirement",
+            "one software AVC session proved at least 600 seconds of near-real-time media progress",
+            media_seconds,
         )
     return PlaybackObservation(
         ProbeOutcome.UNUSABLE_LOAD,
         software_codec,
         software_duration,
         0,
-        "software AVC did not produce a long enough continuous session",
+        "software AVC lacks 600 continuous seconds of explicit near-real-time media progress",
+        media_seconds,
     )
 
 
@@ -344,6 +408,7 @@ def redact_diagnostic_text(text: str) -> str:
 
 
 TARGET_PRODUCT = "tesla_android_rpi4"
+AUTHORIZED_SERIAL = "10000000f93771d0"
 TARGET_DEVICE = "gd_rpi4"
 HARDWARE_AVC_DECODER = "c2.v4l2.avc.decoder"
 PROBE_PROPERTIES = {
@@ -379,8 +444,8 @@ class ProbeState:
 
 class AdbClient:
     def __init__(self, serial: str, runner=subprocess.run):
-        if not serial or serial.startswith("-") or any(c.isspace() for c in serial):
-            raise ProbeError("an explicit valid ADB serial is required")
+        if serial != AUTHORIZED_SERIAL:
+            raise ProbeError("only the explicitly authorized Raspberry Pi serial is permitted")
         self._serial = serial
         self.runner = runner
 
@@ -389,6 +454,8 @@ class AdbClient:
         return self._serial
 
     def _execute(self, command, timeout_seconds):
+        if self.serial != AUTHORIZED_SERIAL:
+            raise ProbeError("ADB serial changed from the authorized target")
         try:
             result = self.runner(command, text=True, capture_output=True,
                                  timeout=timeout_seconds, check=False)
@@ -437,6 +504,8 @@ class AdbClient:
 
 
 def guard_target(client, state=None):
+    if client.serial != AUTHORIZED_SERIAL or (state and state.serial != AUTHORIZED_SERIAL):
+        raise ProbeError("target/state serial is not the authorized Raspberry Pi")
     connected = [serial for serial, status in client.list_devices() if status == "device"]
     if connected != [client.serial]:
         raise ProbeError("require exactly one online device matching the explicit serial")
@@ -575,27 +644,31 @@ def restore_probe_state(client: AdbClient, state: ProbeState) -> None:
     expected = {name: state.properties[name].value for name in PROBE_PROPERTIES}
     observed = {name: None for name in PROBE_PROPERTIES}
     errors = []
+    # Once identity is verified, every cleanup stage gets one bounded attempt.
+    # Interruption is recorded, not allowed to skip the remaining saved writes.
+    def attempt(operation, *args):
+        try:
+            return operation(*args)
+        except BaseException as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+            return None
+
     try:
         guard_target(client, state)
-        client.root()
-        # Attempt both writes even if one fails, then verify actual device state.
-        for name, value in expected.items():
-            try:
-                client.shell("setprop", name, value)
-            except ProbeError as exc:
-                errors.append(str(exc))
-        try:
-            client.reboot()
-            client.wait_for_boot()
-        except ProbeError as exc:
-            errors.append(str(exc))
-        # A listing distinguishes an absent property from a present empty value.
-        restored = parse_getprop_listing(client.shell("getprop"))
+    except BaseException as exc:
+        raise RestoreError(f"{type(exc).__name__}: {exc}", expected, observed) from exc
+    attempt(client.root)
+    for name, value in expected.items():
+        attempt(client.shell, "setprop", name, value)
+    attempt(client.reboot)
+    attempt(client.wait_for_boot)
+    listing = attempt(client.shell, "getprop")
+    if listing is not None:
+        restored = parse_getprop_listing(listing)
         observed.update({name: restored[name].value if name in restored else None for name in expected})
-        if HARDWARE_AVC_DECODER not in parse_codec_inventory(client.shell("dumpsys", "media.player")):
-            errors.append("restored hardware AVC component is not advertised")
-    except ProbeError as exc:
-        errors.append(str(exc))
+    inventory = attempt(client.shell, "dumpsys", "media.player")
+    if inventory is not None and HARDWARE_AVC_DECODER not in parse_codec_inventory(inventory):
+        errors.append("restored hardware AVC component is not advertised")
     if errors or observed != expected:
         raise RestoreError("; ".join(errors) or "restored property values differ", expected, observed)
 
@@ -665,7 +738,8 @@ def run_playback_observation(client, output_dir, duration_seconds, *, read_only=
     events, samples, evidence = [], [], []
     first_event_at = None
     last_progress_at = started
-    last_stamp = None
+    progress = _MediaProgress()
+    watched_session = None
     severe_since = None
     load_reason = None
     current = initial
@@ -678,8 +752,12 @@ def run_playback_observation(client, output_dir, duration_seconds, *, read_only=
                 events.append(event)
                 if first_event_at is None and now - started <= 60 and (read_only or event.codec == SOFTWARE_AVC_DECODER):
                     first_event_at = now
-                if event.event == "sample" and (last_stamp is None or event.timestamp > last_stamp):
-                    last_stamp = event.timestamp
+                qualifies = read_only or event.codec == SOFTWARE_AVC_DECODER
+                key = (event.codec, event.session_id)
+                if event.event == "start" and qualifies:
+                    watched_session = key
+                    last_progress_at = now
+                if progress.add(event) and key == watched_session and qualifies:
                     last_progress_at = now
         evidence.append(diagnostic_lines(current))
         try:
@@ -706,7 +784,7 @@ def run_playback_observation(client, output_dir, duration_seconds, *, read_only=
         elif severe_since is not None and now - severe_since >= 20:
             load_reason = "thermal severe/critical state sustained for 20 seconds"
         elif first_event_at is not None and now - last_progress_at >= 30:
-            load_reason = "no advancing codec progress for 30 seconds"
+            load_reason = "no explicit near-real-time media progress in the watched session for 30 seconds"
         if load_reason or (first_event_at is None and now - started >= 60):
             break
         if first_event_at is not None and now - first_event_at >= duration_seconds:
@@ -714,11 +792,11 @@ def run_playback_observation(client, output_dir, duration_seconds, *, read_only=
         # Reserve two one-second command budgets for the next codec snapshot.
         time.sleep(max(0, now + 8 - time.monotonic()))
         current = read_codec_evidence(client)
-    observation = classify_observation(events, required_seconds=duration_seconds)
+    observation = classify_observation(events)
     if first_event_at is None:
         observation = PlaybackObservation(ProbeOutcome.NO_ENCRYPTED_AVC, None, 0, 0, "no matching encrypted AVC event within 60 seconds")
     elif load_reason:
-        observation = PlaybackObservation(ProbeOutcome.UNUSABLE_LOAD, observation.codec, observation.continuous_seconds, observation.restart_count, load_reason)
+        observation = PlaybackObservation(ProbeOutcome.UNUSABLE_LOAD, observation.codec, observation.continuous_seconds, observation.restart_count, load_reason, observation.media_progress_seconds)
     write_evidence(output_dir, "playback.txt", "\n".join(evidence))
     write_json(output_dir, "events.json", [asdict(event) for event in events])
     # No screenshot: a UI hierarchy cannot prove that a frame contains no private overlay.
@@ -726,7 +804,7 @@ def run_playback_observation(client, output_dir, duration_seconds, *, read_only=
 
 
 def event_key(event):
-    return (event.timestamp, event.package, event.mime, event.codec, event.encrypted, event.event, event.session_id)
+    return (event.timestamp, event.package, event.mime, event.codec, event.encrypted, event.event, event.session_id, event.position_seconds)
 
 
 def write_result(output_dir, state, observation, samples=(), *, duration_seconds=600, mode="probe"):
@@ -770,6 +848,8 @@ def load_state(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1:
         raise ProbeError("unsupported state schema/version")
+    if data.get("serial") != AUTHORIZED_SERIAL:
+        raise ProbeError("saved serial is not the authorized Raspberry Pi")
     required = ("serial", "product", "device", "boot_id", "captured_at")
     if not all(isinstance(data.get(name), str) and data[name] for name in required):
         raise ProbeError("invalid saved identity")

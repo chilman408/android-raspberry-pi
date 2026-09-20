@@ -235,15 +235,15 @@ class AppleTvCodecProbeTest(unittest.TestCase):
     def test_classifier_requires_one_continuous_six_hundred_second_session(self):
         observation = classify_observation(
             parse_codec_events(
-                "100.0 package=com.apple.atve.androidtv.appletv mime=video/avc "
-                "component=c2.ffmpeg.avc.decoder crypto=1 session=one event=start\n"
-                "701.0 package=com.apple.atve.androidtv.appletv mime=video/avc "
-                "component=c2.ffmpeg.avc.decoder crypto=1 session=one event=sample\n"
+                "".join(f"{100 + seconds} package={APPLE_PACKAGE} mime=video/avc "
+                        f"component=c2.ffmpeg.avc.decoder crypto=1 session=one "
+                        f"event={'start' if seconds == 0 else 'sample'} position_seconds={seconds}\n"
+                        for seconds in range(0, 611, 10))
             )
         )
 
         self.assertEqual(observation.outcome, ProbeOutcome.PLAYED_600_SECONDS)
-        self.assertGreaterEqual(observation.continuous_seconds, 601.0)
+        self.assertGreaterEqual(observation.continuous_seconds, 600.0)
         self.assertEqual(observation.restart_count, 0)
 
     def test_classifier_rejects_merged_duration_from_multiple_sessions(self):
@@ -348,6 +348,49 @@ class AppleTvCodecProbeTest(unittest.TestCase):
         self.assertIn("thermal=3", redacted)
         self.assertIn("error=42", redacted)
 
+    def test_codec_parser_preserves_only_finite_nonnegative_explicit_media_positions(self):
+        for value, expected in (("12.5", 12.5), ("0", 0.0), ("nan", None), ("inf", None), ("-1", None), ("unknown", None)):
+            with self.subTest(value=value):
+                events = parse_codec_events(f"100 package={APPLE_PACKAGE} mime=video/avc component=c2.ffmpeg.avc.decoder crypto=1 session=one event=sample position_seconds={value}")
+                self.assertEqual(getattr(events[0], "position_seconds", "missing field"), expected)
+
+    def test_classifier_rejects_sparse_samples_and_missing_or_stagnant_media_counters(self):
+        for samples in (
+            [(0, None), (601, None)],
+            [(0, 0), (601, 0.033)],
+            [(0, 0), (601, 601)],
+            [(seconds, 0) for seconds in range(0, 611, 10)],
+            [(seconds, None) for seconds in range(0, 611, 10)],
+        ):
+            with self.subTest(samples=samples[:2]):
+                text = "".join(f"{100 + stamp} package={APPLE_PACKAGE} mime=video/avc component=c2.ffmpeg.avc.decoder crypto=1 session=one event={'start' if stamp == 0 else 'sample'}" + (f" position_seconds={position}" if position is not None else "") + "\n" for stamp, position in samples)
+                self.assertEqual(classify_observation(parse_codec_events(text)).outcome, ProbeOutcome.UNUSABLE_LOAD)
+
+    def test_classifier_cannot_borrow_media_progress_from_another_session_or_codec(self):
+        for other_session, other_codec in (("other", "c2.ffmpeg.avc.decoder"), ("one", "c2.v4l2.avc.decoder")):
+            with self.subTest(session=other_session, codec=other_codec):
+                text = f"100 package={APPLE_PACKAGE} mime=video/avc component=c2.ffmpeg.avc.decoder crypto=1 session=one event=start position_seconds=0\n"
+                for elapsed in range(10, 611, 10):
+                    text += f"{100 + elapsed} package={APPLE_PACKAGE} mime=video/avc component=c2.ffmpeg.avc.decoder crypto=1 session=one event=sample position_seconds=0\n"
+                    text += f"{100 + elapsed} package={APPLE_PACKAGE} mime=video/avc component={other_codec} crypto=1 session={other_session} event=sample position_seconds={elapsed}\n"
+                self.assertEqual(classify_observation(parse_codec_events(text)).outcome, ProbeOutcome.UNUSABLE_LOAD)
+
+    def test_classifier_requires_near_real_time_media_progress_without_counter_resets(self):
+        for mode in ("slow", "jump", "reset", "no_session"):
+            with self.subTest(mode=mode):
+                text = ""
+                for elapsed in range(0, 611, 10):
+                    position = elapsed / 2 if mode == "slow" else elapsed * 2 if mode == "jump" else elapsed % 310 if mode == "reset" else elapsed
+                    session = "" if mode == "no_session" else "one"
+                    text += f"{100 + elapsed} package={APPLE_PACKAGE} mime=video/avc component=c2.ffmpeg.avc.decoder crypto=1 session={session} event={'start' if elapsed == 0 else 'sample'} position_seconds={position}\n"
+                self.assertEqual(classify_observation(parse_codec_events(text)).outcome, ProbeOutcome.UNUSABLE_LOAD)
+
+    def test_classifier_reports_explicit_six_hundred_second_media_progress(self):
+        text = "".join(f"{100 + seconds} package={APPLE_PACKAGE} mime=video/avc component=c2.ffmpeg.avc.decoder crypto=1 session=one event={'start' if seconds == 0 else 'sample'} position_seconds={20 + seconds}\n" for seconds in range(0, 601, 10))
+        observation = classify_observation(parse_codec_events(text))
+        self.assertEqual(observation.outcome, ProbeOutcome.PLAYED_600_SECONDS)
+        self.assertEqual(getattr(observation, "media_progress_seconds", None), 600)
+
 
 H264 = "persist.ffmpeg_codec2.v4l2.h264"
 RANK = "persist.ffmpeg_codec2.rank.video"
@@ -370,7 +413,7 @@ class RecordingRunner:
         self.clock = clock
         self.commands = []
         self.queued = {}
-        self.serial = "192.0.2.4:5555"
+        self.serial = "10000000f93771d0"
         self.devices = [(self.serial, "device")]
         self.props = {
             H264: "true", RANK: "128", "persist.ffmpeg_codec2.empty": "",
@@ -467,7 +510,16 @@ class RecordingRunner:
         elapsed = self.clock.now - self.started_at
         codec = "c2.v4l2.avc.decoder" if self.mode == "restart" else "c2.ffmpeg.avc.decoder"
         def line(stamp, session, event):
-            return f"{stamp} package={APPLE_PACKAGE} mime=video/avc component={codec} crypto=1 session={session} event={event}\n"
+            position = max(0, stamp - (140 if session == "two" else 100))
+            if self.mode == "stagnant_progress":
+                position = 0
+            elif self.mode == "sparse_frames":
+                position /= 1000
+            if self.mode == "wrong_session_progress" and event == "sample":
+                session = "other"
+            sample_codec = "c2.v4l2.avc.decoder" if self.mode == "wrong_codec_progress" and event == "sample" else codec
+            progress = "" if self.mode == "missing_progress" else f" position_seconds={position}"
+            return f"{stamp} package={APPLE_PACKAGE} mime=video/avc component={sample_codec} crypto=1 session={session} event={event}{progress}\n"
         output = line(100, "one", "start")
         if self.mode == "restart" and elapsed >= 40:
             return output + line(130, "one", "stop") + line(140, "two", "start") + line(100 + elapsed, "two", "sample")
@@ -526,7 +578,7 @@ class AdbOrchestrationTest(unittest.TestCase):
         self.assertEqual(self.cli("baseline"), 0)
         state = json.loads((self.output / "state.json").read_text())
         self.assertEqual(state["version"], 1)
-        self.assertEqual(state["serial"], "192.0.2.4:5555")
+        self.assertEqual(state["serial"], "10000000f93771d0")
         self.assertEqual(state["boot_id"], "boot-1")
         self.assertEqual(state["properties"][H264]["value"], "true")
         self.assertEqual(state["properties"][RANK]["value"], "128")
@@ -773,15 +825,14 @@ class AdbOrchestrationTest(unittest.TestCase):
         failure = json.loads((self.output / "RESTORE_FAILED.json").read_text())
         self.assertEqual(failure["observed"], {H264: "false", RANK: "128"})
 
-    def test_standalone_mutation_function_rejects_wrong_saved_identity(self):
+    def test_restore_loader_rejects_wrong_saved_identity_before_adb(self):
         self.assertEqual(self.cli("baseline"), 0)
         state_path = self.output / "state.json"
         data = json.loads(state_path.read_text())
         data["serial"] = "other"
         state_path.write_text(json.dumps(data))
-        state = probe.load_state(state_path)
         with self.assertRaises(probe.ProbeError):
-            probe.apply_software_avc_probe(probe.AdbClient(self.runner.serial, self.runner), state)
+            probe.load_state(state_path)
         self.assert_no_mutation()
 
     def test_observe_failure_is_classified_without_mutation(self):
@@ -883,6 +934,68 @@ class AdbOrchestrationTest(unittest.TestCase):
         self.assertNotEqual(self.cli(), 0)
         self.assert_no_mutation()
         self.assertEqual(self.runner.props[RANK], "account=private-value")
+
+    def test_unauthorized_cli_serial_is_rejected_before_any_device_operation(self):
+        for action in ("baseline", "probe", "observe"):
+            with self.subTest(action=action):
+                self.runner.serial = "192.0.2.4:5555"
+                self.runner.devices = [(self.runner.serial, "device")]
+                self.output = Path(self.tmp.name) / action
+                self.assertNotEqual(self.cli(action), 0)
+                self.assertEqual(self.runner.commands, [])
+
+    def test_unauthorized_recovery_serial_is_rejected_before_device_operations(self):
+        self.assertEqual(self.cli("baseline"), 0)
+        state_path = self.output / "state.json"
+        data = json.loads(state_path.read_text())
+        data["serial"] = "192.0.2.4:5555"
+        state_path.write_text(json.dumps(data))
+        self.runner.commands.clear()
+        with patch.object(probe.subprocess, "run", self.runner), redirect_stderr(io.StringIO()):
+            self.assertNotEqual(probe.main(["restore", "--serial", "10000000f93771d0", "--state", str(state_path)]), 0)
+        self.assertEqual(self.runner.commands, [])
+
+    def test_interruptions_during_either_restore_write_complete_remaining_cleanup(self):
+        for name, value in ((H264, "true"), (RANK, "128")):
+            for interruption in (KeyboardInterrupt(), SystemExit(9), BaseException("cancelled")):
+                with self.subTest(property=name, interruption=type(interruption).__name__):
+                    self.runner = RecordingRunner(self.clock)
+                    self.output = Path(self.tmp.name) / f"interrupt-{len(list(Path(self.tmp.name).iterdir()))}"
+                    self.runner.queue(("setprop", name, value), interruption)
+                    try:
+                        status = self.cli()
+                    except BaseException as exc:
+                        self.fail(f"restoration interruption escaped cleanup: {type(exc).__name__}")
+                    self.assertNotEqual(status, 0)
+                    self.assertEqual(self.writes()[-2:], [["setprop", H264, "true"], ["setprop", RANK, "128"]])
+                    self.assertEqual(self.runner.boot, 3)
+                    self.assertTrue((self.output / "RESTORE_FAILED.json").exists(), "cleanup interruption must leave residual evidence")
+                    failure = json.loads((self.output / "RESTORE_FAILED.json").read_text())
+                    self.assertEqual(failure["observed"], {H264: "false" if name == H264 else "true", RANK: "16" if name == RANK else "128"})
+                    self.assertIn(type(interruption).__name__, failure["error"])
+                    self.assertIn(["adb", "-s", "10000000f93771d0", "shell", "cmd", "package", "list", "packages", APPLE_PACKAGE], self.runner.commands)
+
+    def test_ninety_second_run_never_claims_six_hundred_second_success(self):
+        for action in ("probe", "observe"):
+            with self.subTest(action=action):
+                self.runner = RecordingRunner(self.clock)
+                self.output = Path(self.tmp.name) / action
+                self.assertEqual(self.cli(action, 90), 0)
+                result = json.loads((self.output / "result.json").read_text())
+                self.assertNotEqual(result["observation"]["outcome"], "PLAYED_600_SECONDS")
+
+    def test_watchdog_requires_real_time_media_progress_from_qualifying_session(self):
+        for mode in ("missing_progress", "stagnant_progress", "sparse_frames", "wrong_session_progress", "wrong_codec_progress"):
+            with self.subTest(mode=mode):
+                self.runner = RecordingRunner(self.clock)
+                self.runner.mode = mode
+                self.output = Path(self.tmp.name) / mode
+                began = self.clock.now
+                self.assertEqual(self.cli(duration=600), 0)
+                result = json.loads((self.output / "result.json").read_text())
+                self.assertEqual(result["observation"]["outcome"], "UNUSABLE_LOAD")
+                self.assertLessEqual(self.clock.now - began, 45, "event timestamp advancement must not reset the media-progress watchdog")
+                self.assertEqual(self.runner.props[H264], "true")
 
 
 if __name__ == "__main__":
