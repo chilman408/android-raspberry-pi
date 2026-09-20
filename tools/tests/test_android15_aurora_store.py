@@ -441,7 +441,10 @@ class MaterializerTests(unittest.TestCase):
             apksigner_name = "apksigner.cmd"
             apksigner_contents = """
                 @echo off
+                echo apksigner %~4>>"%INSPECTION_LOG%"
+                if "%REQUIRE_FINAL_ABSENT%"=="1" if exist "%EXPECTED_FINAL_APK%" exit /b 92
                 if "%REJECT_FINAL_APK%"=="1" if "%~4"=="%EXPECTED_FINAL_APK%" exit /b 91
+                if "%FAKE_APKSIGNER_FAIL%"=="1" exit /b 93
                 echo Verified using v1 scheme (JAR signing): true
                 echo Verified using v2 scheme (APK Signature Scheme v2): true
                 echo Signer #1 certificate SHA-256 digest: 4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f
@@ -449,6 +452,8 @@ class MaterializerTests(unittest.TestCase):
             aapt2_name = "aapt2.cmd"
             aapt2_contents = """
                 @echo off
+                echo aapt2 %~3>>"%INSPECTION_LOG%"
+                if "%REQUIRE_FINAL_ABSENT%"=="1" if exist "%EXPECTED_FINAL_APK%" exit /b 92
                 echo package: name='com.aurora.store' versionCode='76' versionName='4.8.4-preload' compileSdkVersion='37'
                 echo native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
             """
@@ -460,9 +465,14 @@ class MaterializerTests(unittest.TestCase):
             apksigner_name = "apksigner"
             apksigner_contents = """
                 #!/bin/sh
+                printf 'apksigner %s\n' "$4" >> "$INSPECTION_LOG"
+                if [ "${REQUIRE_FINAL_ABSENT:-0}" = 1 ] && [ -e "$EXPECTED_FINAL_APK" ]; then
+                    exit 92
+                fi
                 if [ "${REJECT_FINAL_APK:-0}" = 1 ] && [ "$4" = "$EXPECTED_FINAL_APK" ]; then
                     exit 91
                 fi
+                [ "${FAKE_APKSIGNER_FAIL:-0}" != 1 ] || exit 93
                 printf '%s\n' \
                   'Verified using v1 scheme (JAR signing): true' \
                   'Verified using v2 scheme (APK Signature Scheme v2): true' \
@@ -471,6 +481,10 @@ class MaterializerTests(unittest.TestCase):
             aapt2_name = "aapt2"
             aapt2_contents = """
                 #!/bin/sh
+                printf 'aapt2 %s\n' "$3" >> "$INSPECTION_LOG"
+                if [ "${REQUIRE_FINAL_ABSENT:-0}" = 1 ] && [ -e "$EXPECTED_FINAL_APK" ]; then
+                    exit 92
+                fi
                 printf '%s\n' \
                   "package: name='com.aurora.store' versionCode='76' versionName='4.8.4-preload' compileSdkVersion='37'" \
                   "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'"
@@ -505,6 +519,7 @@ class MaterializerTests(unittest.TestCase):
         environment["FAKE_BIN_BASH"] = self.bash_path(fake_bin)
         environment["FAKE_APK_SOURCE"] = self.bash_path(fixture)
         environment["EXPECTED_FINAL_APK"] = str(destination / EXPECTED_LOCK["filename"])
+        environment["INSPECTION_LOG"] = str(directory / "inspection.log")
         return destination, aosp_root, environment
 
     def run_materializer(
@@ -541,16 +556,34 @@ class MaterializerTests(unittest.TestCase):
         """Installing before complete verification must not expose unverified bytes."""
         with tempfile.TemporaryDirectory() as temp_dir:
             directory = pathlib.Path(temp_dir)
+            inspection_log = directory / "inspection.log"
             lock = self.write_lock(directory, self.fixture_apk_bytes)
             destination, aosp_root, environment = self.make_fixture_environment(directory)
-            environment["REJECT_FINAL_APK"] = "1"
+            environment["REQUIRE_FINAL_ABSENT"] = "1"
+            environment["FAKE_APKSIGNER_FAIL"] = "1"
+
+            rejected = self.run_materializer(lock, destination, aosp_root, environment)
+
+            final_apk = destination / EXPECTED_LOCK["filename"]
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse(final_apk.exists())
+            self.assertEqual(list(destination.glob(".AuroraStore-preload-4.8.4.apk.tmp.*")), [])
+            rejected_calls = inspection_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(rejected_calls), 1)
+            self.assertRegex(rejected_calls[0], r"^apksigner .+\.tmp\.[^\\/]+$")
+
+            del environment["FAKE_APKSIGNER_FAIL"]
+            inspection_log.unlink()
 
             result = self.run_materializer(lock, destination, aosp_root, environment)
 
-            final_apk = destination / EXPECTED_LOCK["filename"]
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(final_apk.read_bytes(), self.fixture_apk_bytes)
             self.assertEqual(list(destination.glob(".AuroraStore-preload-4.8.4.apk.tmp.*")), [])
+            accepted_calls = inspection_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(accepted_calls), 2)
+            self.assertTrue(accepted_calls[0].startswith("apksigner "))
+            self.assertTrue(accepted_calls[1].startswith("aapt2 "))
 
     def test_materializer_removes_temporary_file_when_download_fails(self):
         """A failed transfer must not leave reusable partial download state."""
@@ -588,16 +621,23 @@ class MaterializerTests(unittest.TestCase):
         """A matching installed APK must be inspected again without downloading."""
         with tempfile.TemporaryDirectory() as temp_dir:
             directory = pathlib.Path(temp_dir)
+            inspection_log = directory / "inspection.log"
             lock = self.write_lock(directory, self.fixture_apk_bytes)
             destination, aosp_root, environment = self.make_fixture_environment(directory)
             final_apk = destination / EXPECTED_LOCK["filename"]
             final_apk.write_bytes(self.fixture_apk_bytes)
             environment["FAKE_CURL_FAIL"] = "1"
+            environment["FAKE_APKSIGNER_FAIL"] = "1"
 
             result = self.run_materializer(lock, destination, aosp_root, environment)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.returncode, 0)
             self.assertEqual(final_apk.read_bytes(), self.fixture_apk_bytes)
+            inspection_calls = inspection_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(inspection_calls), 1)
+            tool, inspected_apk = inspection_calls[0].split(" ", 1)
+            self.assertEqual(tool, "apksigner")
+            self.assertEqual(os.path.normcase(inspected_apk), os.path.normcase(str(final_apk)))
 
     def test_materializer_rejects_symlink_destination_or_final_apk(self):
         """Symlinked write targets must not redirect materialization outside its tree."""
