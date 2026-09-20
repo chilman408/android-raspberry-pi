@@ -417,7 +417,7 @@ class RepositoryIntegrationTests(unittest.TestCase):
             if not match:
                 index += 1
                 continue
-            value = match.group(1)
+            value = match.group(1).rstrip(" \t")
             block_header = re.fullmatch(r"([|>])(?:[+-]?[1-9]?|[1-9]?[+-]?)", value)
             if block_header:
                 block = []
@@ -617,6 +617,29 @@ class RepositoryIntegrationTests(unittest.TestCase):
                             *(literal_commands if style == "|" else [folded_command]),
                         ],
                     )
+
+    def test_workflow_command_extractor_ignores_trailing_header_whitespace(self):
+        """Catches trailing scalar-header spaces hiding executable workflow commands."""
+        block_headers = ("|", ">", "|-", "|+", "|2-", "|-2", ">+1", ">1+")
+        cases = [
+            ("plain", "printf plain \t", ["printf", "plain"]),
+            ("quoted", '"printf \\"quoted \\"" \t', ["printf", "quoted "]),
+            *(
+                (header, f"{header} \t", ["adb", "devices"])
+                for header in block_headers
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            workflow = Path(temporary) / "workflow.yml"
+            for name, value, expected in cases:
+                with self.subTest(header=name):
+                    body = "      adb devices\n" if value.startswith(("|", ">")) else ""
+                    workflow.write_text(
+                        f"steps:\n  - run: {value}\n{body}", encoding="utf-8"
+                    )
+
+                    self.assertEqual(self._workflow_commands(workflow), [expected])
 
     def test_live_device_boundary_rejects_each_command_for_workflow_and_validator(self):
         """Catches any live-device action added to either validation source."""
