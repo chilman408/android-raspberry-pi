@@ -42,6 +42,10 @@ python3 "${LOCAL_PATH}/tools/check-gapps-prebuilts.py" \
     "${GAPPS_DIR}/${GAPPS_GMSCORE}" \
     "${GAPPS_DIR}/${GAPPS_VELVET}"
 
+popd
+bash tools/prepare-aurora-store.sh --aosp-root aosptree
+pushd aosptree
+
 # Source checkout is retained between CI runs. Projects removed from the manifest
 # may remain on disk, and Soong scans every Android.bp it finds.
 AOSP_TREE=$(realpath .)

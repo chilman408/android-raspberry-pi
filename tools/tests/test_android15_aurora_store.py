@@ -7,15 +7,26 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import shutil
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "tools" / "check-aurora-store.py"
+MATERIALIZER = REPO_ROOT / "tools" / "prepare-aurora-store.sh"
+UNFOLD = REPO_ROOT / "unfold_aosp.sh"
+GIT_BASH = pathlib.Path(
+    r"C:\Program Files\Git\bin\bash.exe"
+    if os.name == "nt"
+    else shutil.which("bash") or "/bin/bash"
+)
 REPOSITORY_LOCK = (
     REPO_ROOT
     / "aosptree"
@@ -353,6 +364,345 @@ class Android15AuroraStoreTest(unittest.TestCase):
                 pathlib.Path("aapt2"),
                 self.successful_runner(apk),
             )
+
+
+class MaterializerTests(unittest.TestCase):
+    """Behavior tests for downloading and installing the pinned APK safely."""
+
+    fixture_apk_bytes = b"Aurora Store materializer fixture APK\n"
+    bad_apk_bytes = b"rejected Aurora Store materializer fixture\n"
+
+    @staticmethod
+    def bash_path(path: pathlib.Path) -> str:
+        path = path.resolve()
+        if os.name != "nt":
+            return path.as_posix()
+        drive = path.drive.rstrip(":").lower()
+        return f"/{drive}{path.as_posix()[2:]}"
+
+    @staticmethod
+    def write_executable(path: pathlib.Path, contents: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(contents).lstrip(), encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+
+    def create_bash_symlink(self, target: pathlib.Path, link: pathlib.Path) -> None:
+        environment = os.environ.copy()
+        if os.name == "nt":
+            environment["MSYS"] = "winsymlinks:sys"
+        result = subprocess.run(
+            [
+                str(GIT_BASH),
+                "-c",
+                'ln -s -- "$1" "$2"',
+                "symlink",
+                self.bash_path(target),
+                self.bash_path(link),
+            ],
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def write_lock(self, directory: pathlib.Path, apk_bytes: bytes) -> pathlib.Path:
+        values = copy.deepcopy(EXPECTED_LOCK)
+        values["size"] = len(apk_bytes)
+        values["sha256"] = hashlib.sha256(apk_bytes).hexdigest()
+        lock = directory / "aurora-store.lock.json"
+        lock.write_text(json.dumps(values), encoding="utf-8")
+        return lock
+
+    def make_fixture_environment(
+        self, directory: pathlib.Path, download_bytes: bytes | None = None
+    ) -> tuple[pathlib.Path, pathlib.Path, dict[str, str]]:
+        fixture = directory / "fixture.apk"
+        fixture.write_bytes(self.fixture_apk_bytes if download_bytes is None else download_bytes)
+        aosp_root = directory / "aosptree"
+        destination = aosp_root / "vendor" / "devices-community" / "gd_rpi4" / "compatibility-store"
+        destination.mkdir(parents=True)
+        tool_root = aosp_root / "prebuilts" / "sdk" / "tools" / "linux" / "bin"
+        fake_bin = directory / "fake-bin"
+        fake_bin.mkdir()
+
+        if os.name == "nt":
+            python3_contents = f"""
+                #!/bin/bash
+                arguments=()
+                for argument in "$@"; do
+                    case "$argument" in
+                        */apksigner|*/aapt2) argument="${{argument}}.cmd" ;;
+                    esac
+                    arguments+=("$argument")
+                done
+                exec {self.bash_path(pathlib.Path(sys.executable))!r} "${{arguments[@]}}"
+            """
+            apksigner_name = "apksigner.cmd"
+            apksigner_contents = """
+                @echo off
+                if "%REJECT_FINAL_APK%"=="1" if "%~4"=="%EXPECTED_FINAL_APK%" exit /b 91
+                echo Verified using v1 scheme (JAR signing): true
+                echo Verified using v2 scheme (APK Signature Scheme v2): true
+                echo Signer #1 certificate SHA-256 digest: 4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f
+            """
+            aapt2_name = "aapt2.cmd"
+            aapt2_contents = """
+                @echo off
+                echo package: name='com.aurora.store' versionCode='76' versionName='4.8.4-preload' compileSdkVersion='37'
+                echo native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
+            """
+        else:
+            python3_contents = f"""
+                #!/bin/sh
+                exec {self.bash_path(pathlib.Path(sys.executable))!r} "$@"
+            """
+            apksigner_name = "apksigner"
+            apksigner_contents = """
+                #!/bin/sh
+                if [ "${REJECT_FINAL_APK:-0}" = 1 ] && [ "$4" = "$EXPECTED_FINAL_APK" ]; then
+                    exit 91
+                fi
+                printf '%s\n' \
+                  'Verified using v1 scheme (JAR signing): true' \
+                  'Verified using v2 scheme (APK Signature Scheme v2): true' \
+                  'Signer #1 certificate SHA-256 digest: 4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f'
+            """
+            aapt2_name = "aapt2"
+            aapt2_contents = """
+                #!/bin/sh
+                printf '%s\n' \
+                  "package: name='com.aurora.store' versionCode='76' versionName='4.8.4-preload' compileSdkVersion='37'" \
+                  "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'"
+            """
+        self.write_executable(fake_bin / "python3", python3_contents)
+        self.write_executable(
+            fake_bin / "curl",
+            """
+            #!/bin/sh
+            output=
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --output) output="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            [ "${FAKE_CURL_FAIL:-0}" != 1 ] || exit 22
+            cp -- "$FAKE_APK_SOURCE" "$output"
+            """,
+        )
+        self.write_executable(
+            tool_root / apksigner_name,
+            apksigner_contents,
+        )
+        self.write_executable(
+            tool_root / aapt2_name,
+            aapt2_contents,
+        )
+
+        environment = os.environ.copy()
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment["PATH"]
+        environment["FAKE_BIN_BASH"] = self.bash_path(fake_bin)
+        environment["FAKE_APK_SOURCE"] = self.bash_path(fixture)
+        environment["EXPECTED_FINAL_APK"] = str(destination / EXPECTED_LOCK["filename"])
+        return destination, aosp_root, environment
+
+    def run_materializer(
+        self,
+        lock: pathlib.Path,
+        destination: pathlib.Path,
+        aosp_root: pathlib.Path,
+        environment: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        if not MATERIALIZER.is_file():
+            self.fail(f"materializer script is missing: {MATERIALIZER}")
+        return subprocess.run(
+            [
+                str(GIT_BASH),
+                "-c",
+                'export PATH="$FAKE_BIN_BASH:$PATH"; exec bash "$@"',
+                "materializer",
+                self.bash_path(MATERIALIZER),
+                "--lock",
+                self.bash_path(lock),
+                "--destination",
+                self.bash_path(destination),
+                "--aosp-root",
+                self.bash_path(aosp_root),
+            ],
+            cwd=REPO_ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_materializer_downloads_verifies_and_atomically_installs(self):
+        """Installing before complete verification must not expose unverified bytes."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(directory)
+            environment["REJECT_FINAL_APK"] = "1"
+
+            result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            final_apk = destination / EXPECTED_LOCK["filename"]
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(final_apk.read_bytes(), self.fixture_apk_bytes)
+            self.assertEqual(list(destination.glob(".AuroraStore-preload-4.8.4.apk.tmp.*")), [])
+
+    def test_materializer_removes_temporary_file_when_download_fails(self):
+        """A failed transfer must not leave reusable partial download state."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(directory)
+            environment["FAKE_CURL_FAIL"] = "1"
+
+            result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((destination / EXPECTED_LOCK["filename"]).exists())
+            self.assertEqual(list(destination.glob(".AuroraStore-preload-4.8.4.apk.tmp.*")), [])
+
+    def test_materializer_does_not_replace_existing_verified_apk_on_bad_download(self):
+        """A rejected replacement must leave the previously installed bytes intact."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(
+                directory, self.bad_apk_bytes
+            )
+            final_apk = destination / EXPECTED_LOCK["filename"]
+            previous_bytes = b"previously verified Aurora Store APK\n"
+            final_apk.write_bytes(previous_bytes)
+
+            result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(final_apk.read_bytes(), previous_bytes)
+            self.assertEqual(list(destination.glob(".AuroraStore-preload-4.8.4.apk.tmp.*")), [])
+
+    def test_materializer_reverifies_matching_existing_apk_without_network(self):
+        """A matching installed APK must be inspected again without downloading."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(directory)
+            final_apk = destination / EXPECTED_LOCK["filename"]
+            final_apk.write_bytes(self.fixture_apk_bytes)
+            environment["FAKE_CURL_FAIL"] = "1"
+
+            result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(final_apk.read_bytes(), self.fixture_apk_bytes)
+
+    def test_materializer_rejects_symlink_destination_or_final_apk(self):
+        """Symlinked write targets must not redirect materialization outside its tree."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(directory)
+            real_destination = directory / "real-destination"
+            real_destination.mkdir()
+            destination.rmdir()
+            self.create_bash_symlink(real_destination, destination)
+
+            destination_result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertNotEqual(destination_result.returncode, 0)
+            self.assertEqual(list(real_destination.iterdir()), [])
+
+            destination.unlink()
+            destination.mkdir()
+            outside_apk = directory / "outside.apk"
+            outside_apk.write_bytes(b"outside bytes\n")
+            self.create_bash_symlink(outside_apk, destination / EXPECTED_LOCK["filename"])
+
+            final_result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertNotEqual(final_result.returncode, 0)
+            self.assertEqual(outside_apk.read_bytes(), b"outside bytes\n")
+
+    def test_unfold_invokes_materializer_after_repo_sync_before_build_inputs_are_used(self):
+        """Source preparation must materialize only after sync and GApps verification."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            event_log = directory / "events.log"
+            fake_bin = directory / "fake-bin"
+            (directory / "aosptree" / ".repo" / "manifests").mkdir(parents=True)
+            (directory / "aosptree" / ".repo" / "manifests" / "default.xml").write_text("old\n")
+            (directory / "aosptree" / "foo").mkdir()
+            (directory / "aosptree" / "external" / "libcxx" / "include").mkdir(parents=True)
+            (directory / "aosptree" / "external" / "libcxx" / "include" / "chrono").touch()
+            (directory / "manifests").mkdir()
+            for manifest in ("tesla-android.xml", "glodroid.xml", "default_aosp.xml"):
+                (directory / "manifests" / manifest).write_text("<manifest/>\n")
+            (directory / "patches-aosp" / "foo").mkdir(parents=True)
+            (directory / "patches-aosp" / "foo" / "0001-test.patch").write_text("fixture\n")
+            (directory / "tools").mkdir()
+
+            self.write_executable(
+                fake_bin / "repo",
+                """
+                #!/bin/sh
+                printf 'repo %s\n' "$*" >> "$EVENT_LOG"
+                """,
+            )
+            self.write_executable(
+                fake_bin / "git",
+                """
+                #!/bin/sh
+                printf 'git %s\n' "$*" >> "$EVENT_LOG"
+                exit 0
+                """,
+            )
+            self.write_executable(
+                fake_bin / "python3",
+                """
+                #!/bin/sh
+                printf 'gapps-verify %s\n' "$*" >> "$EVENT_LOG"
+                """,
+            )
+            self.write_executable(
+                directory / "tools" / "prepare-aurora-store.sh",
+                """
+                #!/bin/sh
+                printf 'materializer %s\n' "$*" >> "$EVENT_LOG"
+                """,
+            )
+            environment = os.environ.copy()
+            environment["PATH"] = str(fake_bin) + os.pathsep + environment["PATH"]
+            environment["FAKE_BIN_BASH"] = self.bash_path(fake_bin)
+            environment["EVENT_LOG"] = self.bash_path(event_log)
+
+            result = subprocess.run(
+                [
+                    str(GIT_BASH),
+                    "-c",
+                    'export PATH="$FAKE_BIN_BASH:$PATH"; exec bash "$1"',
+                    "unfold",
+                    self.bash_path(UNFOLD),
+                ],
+                cwd=directory,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            events = event_log.read_text(encoding="utf-8").splitlines()
+            sync_index = next(index for index, event in enumerate(events) if event.startswith("repo sync --no-clone"))
+            gapps_index = next(index for index, event in enumerate(events) if event.startswith("gapps-verify "))
+            materializer_index = next(index for index, event in enumerate(events) if event.startswith("materializer "))
+            patch_index = next(index for index, event in enumerate(events) if event.startswith("git am "))
+            self.assertLess(sync_index, gapps_index)
+            self.assertLess(gapps_index, materializer_index)
+            self.assertLess(materializer_index, patch_index)
+            self.assertEqual(events[materializer_index], "materializer --aosp-root aosptree")
 
 
 if __name__ == "__main__":
