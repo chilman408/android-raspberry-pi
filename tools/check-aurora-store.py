@@ -49,7 +49,7 @@ class AuroraLock:
     def from_path(cls, path: pathlib.Path) -> "AuroraLock":
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
             raise LockError("lock file could not be read as JSON") from error
         if not isinstance(data, dict):
             raise LockError("lock must be a JSON object")
@@ -154,15 +154,15 @@ def verify_apk(
     logical_filename: str | None = None,
 ) -> None:
     """Raise VerificationError unless APK, tools, and metadata satisfy ``lock``."""
-    expected_filename = apk.name if logical_filename is None else logical_filename
-    if expected_filename != lock.filename:
-        raise VerificationError("APK filename does not match the lock")
     try:
         apk_status = apk.stat()
     except OSError as error:
         raise VerificationError("APK is not a readable regular file") from error
     if not stat.S_ISREG(apk_status.st_mode):
         raise VerificationError("APK is not a regular file")
+    expected_filename = apk.name if logical_filename is None else logical_filename
+    if expected_filename != lock.filename:
+        raise VerificationError("APK filename does not match the lock")
     if apk_status.st_size != lock.size:
         raise VerificationError("APK size does not match the lock")
     try:

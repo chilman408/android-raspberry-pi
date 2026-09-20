@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 
 import copy
+import contextlib
 import dataclasses
 import hashlib
 import importlib.util
+import io
 import json
 import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -75,34 +78,43 @@ class Android15AuroraStoreTest(unittest.TestCase):
         )
         return aurora_store.AuroraLock.from_path(lock_path), apk
 
-    def successful_runner(self, args, **kwargs):
-        self.assertTrue(kwargs["text"])
-        self.assertTrue(kwargs["capture_output"])
-        self.assertFalse(kwargs["check"])
-        if args[1:4] == ["verify", "--verbose", "--print-certs"]:
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=(
-                    "Verified using v1 scheme (JAR signing): true\n"
-                    "Verified using v2 scheme (APK Signature Scheme v2): true\n"
-                    "Signer #1 certificate SHA-256 digest: "
-                    "4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f\n"
-                ),
-                stderr="",
-            )
-        if args[1:3] == ["dump", "badging"]:
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=(
-                    "package: name='com.aurora.store' versionCode='76' "
-                    "versionName='4.8.4-preload' compileSdkVersion='37'\n"
-                    "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'\n"
-                ),
-                stderr="",
-            )
-        self.fail(f"unexpected verifier command: {args}")
+    def successful_runner(self, apk: pathlib.Path):
+        signature_command = [str(pathlib.Path("apksigner")), "verify", "--verbose", "--print-certs", str(apk)]
+        badging_command = [str(pathlib.Path("aapt2")), "dump", "badging", str(apk)]
+
+        def runner(args, **kwargs):
+            self.assertEqual(kwargs, {"text": True, "capture_output": True, "check": False})
+            if args == signature_command:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    stdout=(
+                        "Verified using v1 scheme (JAR signing): true\n"
+                        "Verified using v2 scheme (APK Signature Scheme v2): true\n"
+                        "Signer #1 certificate SHA-256 digest: "
+                        "4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f\n"
+                    ),
+                    stderr="",
+                )
+            if args == badging_command:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    stdout=(
+                        "package: name='com.aurora.store' versionCode='76' "
+                        "versionName='4.8.4-preload' compileSdkVersion='37'\n"
+                        "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'\n"
+                    ),
+                    stderr="",
+                )
+            self.fail(f"unexpected verifier command: {args}")
+
+        return runner
+
+    def cli_args(self, lock: pathlib.Path, apk: pathlib.Path) -> list[str]:
+        return [
+            "--lock", str(lock), "--apk", str(apk), "--apksigner", "apksigner", "--aapt2", "aapt2",
+        ]
 
     def test_repository_lock_has_exact_approved_release(self):
         """Changing any approved provenance field must reject the repository lock."""
@@ -155,6 +167,57 @@ class Android15AuroraStoreTest(unittest.TestCase):
                     with self.assertRaises(aurora_store.LockError):
                         aurora_store.AuroraLock.from_path(self.write_lock(directory, **{field: value}))
 
+    def test_cli_invalid_utf8_lock_returns_one_contract_error(self):
+        """Invalid lock bytes must produce the CLI's normal single-error contract."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = directory / "invalid.lock.json"
+            lock.write_bytes(b"\xff")
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = aurora_store.main(self.cli_args(lock, directory / "missing.apk"))
+            self.assertEqual(result, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertRegex(stderr.getvalue(), r"^ERROR: [^\n]+\n$")
+
+    def test_cli_contract_failure_returns_one_error_line(self):
+        """Schema violations must use exit 1 and one concise contract-error line."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = aurora_store.main(self.cli_args(self.write_lock(directory, version_code=0), directory / "missing.apk"))
+            self.assertEqual(result, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertRegex(stderr.getvalue(), r"^ERROR: [^\n]+\n$")
+
+    def test_cli_success_prints_message_and_returns_zero(self):
+        """A successful verification must expose the documented CLI success result."""
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(aurora_store, "verify_apk"), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = aurora_store.main(self.cli_args(REPOSITORY_LOCK, pathlib.Path("fixture.apk")))
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.getvalue(), "Aurora Store artifact verification passed.\n")
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_cli_argparse_failure_exits_two(self):
+        """Missing required invocation arguments must retain argparse's exit code."""
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            aurora_store.main([])
+        self.assertEqual(error.exception.code, 2)
+
+    def test_verify_requires_regular_file_before_filename_match(self):
+        """A missing APK must fail the regular-file check before filename comparison."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            lock, _ = self.fixture_lock_and_apk(pathlib.Path(temp_dir))
+            with self.assertRaisesRegex(aurora_store.VerificationError, "regular file"):
+                aurora_store.verify_apk(
+                    lock,
+                    pathlib.Path(temp_dir) / "wrong-name.apk",
+                    pathlib.Path("apksigner"),
+                    pathlib.Path("aapt2"),
+                )
+
     def test_verify_rejects_size_and_sha256_mismatch_before_tools_run(self):
         """A damaged download must fail before certificate or manifest inspection."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -164,7 +227,7 @@ class Android15AuroraStoreTest(unittest.TestCase):
 
             def runner(args, **kwargs):
                 calls.append(args)
-                return self.successful_runner(args, **kwargs)
+                return self.successful_runner(apk)(args, **kwargs)
 
             wrong_size = dataclasses.replace(lock, size=lock.size + 1)
             with self.assertRaises(aurora_store.VerificationError):
@@ -181,7 +244,8 @@ class Android15AuroraStoreTest(unittest.TestCase):
             lock, apk = self.fixture_lock_and_apk(directory)
 
             def runner(args, **kwargs):
-                if args[1] == "verify":
+                self.assertEqual(kwargs, {"text": True, "capture_output": True, "check": False})
+                if args == ["apksigner", "verify", "--verbose", "--print-certs", str(apk)]:
                     return subprocess.CompletedProcess(
                         args,
                         0,
@@ -194,7 +258,8 @@ class Android15AuroraStoreTest(unittest.TestCase):
                 aurora_store.verify_apk(lock, apk, pathlib.Path("apksigner"), pathlib.Path("aapt2"), runner)
 
             def wrong_signer_runner(args, **kwargs):
-                if args[1] == "verify":
+                self.assertEqual(kwargs, {"text": True, "capture_output": True, "check": False})
+                if args == ["apksigner", "verify", "--verbose", "--print-certs", str(apk)]:
                     return subprocess.CompletedProcess(
                         args,
                         0,
@@ -210,7 +275,8 @@ class Android15AuroraStoreTest(unittest.TestCase):
                 aurora_store.verify_apk(lock, apk, pathlib.Path("apksigner"), pathlib.Path("aapt2"), wrong_signer_runner)
 
             def duplicate_signer_runner(args, **kwargs):
-                if args[1] == "verify":
+                self.assertEqual(kwargs, {"text": True, "capture_output": True, "check": False})
+                if args == ["apksigner", "verify", "--verbose", "--print-certs", str(apk)]:
                     return subprocess.CompletedProcess(
                         args,
                         0,
@@ -235,21 +301,21 @@ class Android15AuroraStoreTest(unittest.TestCase):
             lock, apk = self.fixture_lock_and_apk(directory)
 
             def runner(args, **kwargs):
-                if args[1] == "verify":
-                    return self.successful_runner(args, **kwargs)
-                return subprocess.CompletedProcess(
-                    args,
-                    0,
-                    stdout=(
-                        "package: name='com.other.store' versionCode='76' "
-                        "versionName='4.8.4-preload' compileSdkVersion='37'\n"
-                        "native-code: 'arm64-v8a'\n"
-                    ),
-                    stderr="",
-                )
+                self.assertEqual(kwargs, {"text": True, "capture_output": True, "check": False})
+                if args == ["apksigner", "verify", "--verbose", "--print-certs", str(apk)]:
+                    return self.successful_runner(apk)(args, **kwargs)
+                self.assertEqual(args, ["aapt2", "dump", "badging", str(apk)])
+                return subprocess.CompletedProcess(args, 0, stdout=runner.badging, stderr="")
 
-            with self.assertRaises(aurora_store.VerificationError):
-                aurora_store.verify_apk(lock, apk, pathlib.Path("apksigner"), pathlib.Path("aapt2"), runner)
+            for name, badging in (
+                ("package", "package: name='com.other.store' versionCode='76' versionName='4.8.4-preload' compileSdkVersion='37'\nnative-code: 'arm64-v8a'\n"),
+                ("version code", "package: name='com.aurora.store' versionCode='77' versionName='4.8.4-preload' compileSdkVersion='37'\nnative-code: 'arm64-v8a'\n"),
+                ("version name", "package: name='com.aurora.store' versionCode='76' versionName='other' compileSdkVersion='37'\nnative-code: 'arm64-v8a'\n"),
+            ):
+                with self.subTest(field=name):
+                    runner.badging = badging
+                    with self.assertRaises(aurora_store.VerificationError):
+                        aurora_store.verify_apk(lock, apk, pathlib.Path("apksigner"), pathlib.Path("aapt2"), runner)
 
     def test_verify_requires_arm64_v8a_native_code(self):
         """An APK without Raspberry Pi's native ABI must be rejected."""
@@ -258,8 +324,10 @@ class Android15AuroraStoreTest(unittest.TestCase):
             lock, apk = self.fixture_lock_and_apk(directory)
 
             def runner(args, **kwargs):
-                if args[1] == "verify":
-                    return self.successful_runner(args, **kwargs)
+                self.assertEqual(kwargs, {"text": True, "capture_output": True, "check": False})
+                if args == ["apksigner", "verify", "--verbose", "--print-certs", str(apk)]:
+                    return self.successful_runner(apk)(args, **kwargs)
+                self.assertEqual(args, ["aapt2", "dump", "badging", str(apk)])
                 return subprocess.CompletedProcess(
                     args,
                     0,
@@ -283,7 +351,7 @@ class Android15AuroraStoreTest(unittest.TestCase):
                 apk,
                 pathlib.Path("apksigner"),
                 pathlib.Path("aapt2"),
-                self.successful_runner,
+                self.successful_runner(apk),
             )
 
 
