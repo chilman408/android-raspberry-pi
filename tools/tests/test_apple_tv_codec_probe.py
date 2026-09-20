@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import io
 import os
+import re
 from contextlib import redirect_stderr
 from unittest.mock import patch
 
@@ -390,6 +391,169 @@ class AppleTvCodecProbeTest(unittest.TestCase):
         observation = classify_observation(parse_codec_events(text))
         self.assertEqual(observation.outcome, ProbeOutcome.PLAYED_600_SECONDS)
         self.assertEqual(getattr(observation, "media_progress_seconds", None), 600)
+
+
+class RepositoryIntegrationTests(unittest.TestCase):
+    """Repository contracts that keep the Apple diagnostics fixture-only."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    harness_command = [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "tools/tests/test_apple_tv_codec_probe.py",
+    ]
+
+    @staticmethod
+    def _workflow_commands(path):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        commands = []
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            indentation = len(line) - len(line.lstrip())
+            stripped = line.strip()
+            if not stripped.startswith("run:"):
+                index += 1
+                continue
+            value = stripped.removeprefix("run:").strip()
+            if value in ("|", ">"):
+                block = []
+                index += 1
+                while index < len(lines):
+                    nested = lines[index]
+                    if nested.strip() and len(nested) - len(nested.lstrip()) <= indentation:
+                        break
+                    block.append(nested.strip())
+                    index += 1
+                commands.extend(command for command in block if command)
+                continue
+            if value:
+                commands.append(value)
+            index += 1
+        return [shlex.split(command) for command in commands]
+
+    @staticmethod
+    def _make_recipe_commands(path):
+        commands = []
+        pending = ""
+        for line in path.read_text(encoding="utf-8").splitlines():
+            pending += line.rstrip()
+            if pending.endswith("\\"):
+                pending = pending[:-1] + " "
+                continue
+            if pending.startswith("\t"):
+                commands.append(shlex.split(pending.strip()))
+            pending = ""
+        return commands
+
+    @staticmethod
+    def _vendor_properties(path):
+        properties = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            for word in shlex.split(line.rstrip("\\").strip()):
+                if "=" in word and not word.startswith("$("):
+                    name, value = word.split("=", 1)
+                    properties[name] = value
+        return properties
+
+    @staticmethod
+    def _guarded_unittest_commands(path):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        guarded_commands = []
+        index = 0
+        while index < len(lines):
+            condition = lines[index].strip()
+            if not condition.startswith("if ! ") or not condition.endswith("; then"):
+                index += 1
+                continue
+            command = shlex.split(condition[5:-6].strip())
+            body = []
+            index += 1
+            while index < len(lines) and lines[index].strip() != "fi":
+                body.append(lines[index])
+                index += 1
+            guarded_commands.append((command, "\n".join(body)))
+            index += 1
+        return guarded_commands
+
+    def test_port_validator_guards_harness_fixture_with_failure_counter(self):
+        """Catches removal of the fixture module or its failure-counter handling."""
+        guarded_commands = self._guarded_unittest_commands(
+            self.repo_root / "tools/check-android15-port.sh"
+        )
+        matching_bodies = [
+            body for command, body in guarded_commands if command == self.harness_command
+        ]
+
+        self.assertEqual(len(matching_bodies), 1)
+        self.assertTrue(
+            any(
+                re.search(
+                    r"failures\s*=\s*\$\(\(\s*failures\s*\+\s*1\s*\)\)",
+                    body,
+                )
+                for body in matching_bodies
+            )
+        )
+
+    def test_workflow_schedules_the_harness_fixture_module(self):
+        """Catches CI dropping the fixture module while the local validator still runs it."""
+        commands = self._workflow_commands(
+            self.repo_root / ".github/workflows/android15-port-validation.yml"
+        )
+
+        self.assertIn(self.harness_command, commands)
+
+    def test_repository_validation_never_schedules_a_live_probe(self):
+        """Catches a workflow or product recipe invoking the live probe action."""
+        paths_and_commands = [
+            (
+                ".github/workflows/android15-port-validation.yml",
+                self._workflow_commands(
+                    self.repo_root / ".github/workflows/android15-port-validation.yml"
+                ),
+            )
+        ]
+        product_root = self.repo_root / "aosptree/vendor/devices-community/gd_rpi4"
+        paths_and_commands.extend(
+            (
+                str(path.relative_to(self.repo_root)),
+                self._make_recipe_commands(path),
+            )
+            for path in product_root.rglob("*.mk")
+        )
+
+        for path, commands in paths_and_commands:
+            for command in commands:
+                with self.subTest(path=path, command=command):
+                    probe_index = next(
+                        (
+                            index
+                            for index, argument in enumerate(command)
+                            if argument.endswith("tools/apple_tv_codec_probe.py")
+                        ),
+                        None,
+                    )
+                    if probe_index is not None:
+                        self.assertNotIn("probe", command[probe_index + 1 :])
+
+    def test_product_codec_contract_remains_hardware_scoped_without_framework_hook(self):
+        """Catches a global software AVC override or Apple-specific framework behavior."""
+        device_mk = self.repo_root / "aosptree/vendor/devices-community/gd_rpi4/device.mk"
+        properties = self._vendor_properties(device_mk)
+
+        self.assertEqual(properties.get("persist.ffmpeg_codec2.v4l2.h264"), "true")
+        self.assertEqual(properties.get("persist.ffmpeg_codec2.rank.video"), "128")
+        self.assertNotIn("c2.ffmpeg.avc.decoder", device_mk.read_text(encoding="utf-8"))
+
+        framework_patches = self.repo_root / "patches-aosp/frameworks"
+        for patch in framework_patches.rglob("*.patch"):
+            with self.subTest(patch=patch):
+                self.assertNotIn(APPLE_PACKAGE, patch.read_text(encoding="utf-8"))
 
 
 H264 = "persist.ffmpeg_codec2.v4l2.h264"
