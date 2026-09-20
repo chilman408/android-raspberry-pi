@@ -1,0 +1,15 @@
+{
+  "package_name": "com.aurora.store",
+  "version_name": "4.8.4-preload",
+  "version_code": 76,
+  "filename": "AuroraStore-preload-4.8.4.apk",
+  "url": "https://auroraoss.com/downloads/AuroraStore/Release/preload/AuroraStore-preload-4.8.4.apk",
+  "size": 9362717,
+  "sha256": "d2c0cd2ecaf3211ac31328e20649c654666e391afc9335478d8360a633bb159b",
+  "signer_sha256": "4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f",
+  "source_commit": "ad3d349edce82e119ba239f3a07b3afe028abd19",
+  "source_url": "https://gitlab.com/AuroraOSS/AuroraStore/-/tree/ad3d349edce82e119ba239f3a07b3afe028abd19",
+  "license": "GPL-3.0-or-later",
+  "license_url": "https://gitlab.com/AuroraOSS/AuroraStore/-/raw/ad3d349edce82e119ba239f3a07b3afe028abd19/LICENSE",
+  "license_sha256": "e16780aff588719628230b714c3beb9735d018df2d69f24f1927114cec180c38"
+}
