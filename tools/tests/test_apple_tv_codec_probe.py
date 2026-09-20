@@ -413,26 +413,93 @@ class RepositoryIntegrationTests(unittest.TestCase):
         while index < len(lines):
             line = lines[index]
             indentation = len(line) - len(line.lstrip())
-            stripped = line.strip()
-            if not stripped.startswith("run:"):
+            match = re.match(r"^\s*(?:-\s+)?run:\s*(.*)$", line)
+            if not match:
                 index += 1
                 continue
-            value = stripped.removeprefix("run:").strip()
-            if value in ("|", ">"):
+            value = match.group(1)
+            block_header = re.fullmatch(r"([|>])(?:[+-]?[1-9]?|[1-9]?[+-]?)", value)
+            if block_header:
                 block = []
                 index += 1
                 while index < len(lines):
                     nested = lines[index]
                     if nested.strip() and len(nested) - len(nested.lstrip()) <= indentation:
                         break
-                    block.append(nested.strip())
+                    block.append(nested)
                     index += 1
-                commands.extend(command for command in block if command)
+                content_indents = [
+                    len(nested) - len(nested.lstrip())
+                    for nested in block
+                    if nested.strip()
+                ]
+                content_indent = min(content_indents, default=0)
+                content = [
+                    nested[content_indent:] if nested.strip() else ""
+                    for nested in block
+                ]
+                if block_header.group(1) == ">":
+                    scalar = content[0] if content else ""
+                    for content_index in range(1, len(content)):
+                        separator = (
+                            "\n"
+                            if not content[content_index] or not content[content_index - 1]
+                            else " "
+                        )
+                        scalar += separator + content[content_index]
+                else:
+                    scalar = "\n".join(content)
+                commands.extend(command for command in scalar.splitlines() if command.strip())
                 continue
             if value:
-                commands.append(value)
+                if value.startswith('"') and value.endswith('"'):
+                    commands.append(json.loads(value))
+                elif value.startswith("'") and value.endswith("'"):
+                    commands.append(value[1:-1].replace("''", "'"))
+                else:
+                    commands.append(value)
             index += 1
-        return [shlex.split(command) for command in commands]
+        return [shlex.split(command, comments=True) for command in commands]
+
+    @staticmethod
+    def _validator_commands(path):
+        commands = []
+        pending = ""
+        heredoc_end = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if heredoc_end:
+                if line.strip() == heredoc_end:
+                    heredoc_end = None
+                continue
+            pending += line.rstrip()
+            if pending.endswith("\\"):
+                pending = pending[:-1] + " "
+                continue
+            statement = pending.strip()
+            pending = ""
+            if not statement or statement.startswith("#"):
+                continue
+            if statement.startswith("if ! ") and statement.endswith("; then"):
+                statement = statement[5:-6].strip()
+            if statement in {"then", "fi", "else"} or statement.endswith("() {"):
+                continue
+            tokens = shlex.split(statement, comments=True)
+            if tokens and "=" not in tokens[0]:
+                commands.append(tokens)
+            heredoc = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", statement)
+            if heredoc:
+                heredoc_end = heredoc.group(1)
+        return commands
+
+    @staticmethod
+    def _is_live_device_command(command):
+        executable = command[0] if command else ""
+        return (
+            any(argument.endswith("tools/apple_tv_codec_probe.py") for argument in command)
+            or executable == "adb"
+            or executable in {"reboot", "setprop"}
+            or "10000000f93771d0" in command
+        )
 
     @staticmethod
     def _make_recipe_commands(path):
@@ -508,15 +575,116 @@ class RepositoryIntegrationTests(unittest.TestCase):
 
         self.assertIn(self.harness_command, commands)
 
-    def test_repository_validation_never_schedules_a_live_probe(self):
-        """Catches a workflow or product recipe invoking the live probe action."""
+    def test_workflow_command_extractor_supports_scalar_styles_and_indicators(self):
+        """Catches YAML scalar forms that hide executable workflow commands."""
+        plain_command = ["python3", "-m", "unittest", "-v", "tools/tests/plain.py"]
+        quoted_command = ["python3", "-m", "unittest", "-v", "tools/tests/quoted.py"]
+        literal_commands = [
+            ["python3", "-m", "unittest", "-v", "tools/tests/literal.py"],
+            ["printf", "literal"],
+        ]
+        folded_command = [
+            "python3",
+            "-m",
+            "unittest",
+            "-v",
+            "tools/tests/folded.py",
+            "printf",
+            "folded",
+        ]
+        headers = ("|", ">", "|-", "|+", "|2-", "|-2", ">+1", ">1+")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            workflow = Path(temporary) / "workflow.yml"
+            for header in headers:
+                with self.subTest(header=header):
+                    style = header[0]
+                    workflow.write_text(
+                        "steps:\n"
+                        "  - run: python3 -m unittest -v tools/tests/plain.py\n"
+                        "  - run: 'python3 -m unittest -v tools/tests/quoted.py'\n"
+                        f"  - run: {header}\n"
+                        f"      python3 -m unittest -v tools/tests/{'literal' if style == '|' else 'folded'}.py\n"
+                        f"      printf {'literal' if style == '|' else 'folded'}\n",
+                        encoding="utf-8",
+                    )
+
+                    self.assertEqual(
+                        self._workflow_commands(workflow),
+                        [
+                            plain_command,
+                            quoted_command,
+                            *(literal_commands if style == "|" else [folded_command]),
+                        ],
+                    )
+
+    def test_live_device_boundary_rejects_each_command_for_workflow_and_validator(self):
+        """Catches any live-device action added to either validation source."""
+        prohibited_commands = {
+            "baseline": ["python3", "tools/apple_tv_codec_probe.py", "baseline"],
+            "observe": ["python3", "tools/apple_tv_codec_probe.py", "observe"],
+            "probe": ["python3", "tools/apple_tv_codec_probe.py", "probe"],
+            "restore": ["python3", "tools/apple_tv_codec_probe.py", "restore"],
+            "adb": ["adb", "devices"],
+            "authorized serial": ["printf", "10000000f93771d0"],
+            "adb root": ["adb", "root"],
+            "reboot": ["reboot"],
+            "setprop": ["setprop", "persist.ffmpeg_codec2.v4l2.h264", "false"],
+        }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            for source in ("workflow", "validator"):
+                source_path = temporary_path / f"{source}.{'yml' if source == 'workflow' else 'sh'}"
+                for name, command in prohibited_commands.items():
+                    with self.subTest(source=source, command=name):
+                        source_path.write_text(
+                            (
+                                "steps:\n  - run: " if source == "workflow" else ""
+                            ) + " ".join(command) + "\n",
+                            encoding="utf-8",
+                        )
+                        commands = (
+                            self._workflow_commands(source_path)
+                            if source == "workflow"
+                            else self._validator_commands(source_path)
+                        )
+                        self.assertEqual(commands, [command])
+                        self.assertTrue(self._is_live_device_command(commands[0]))
+        self.assertFalse(self._is_live_device_command(self.harness_command))
+
+    def test_validator_command_extractor_ignores_heredoc_prose(self):
+        """Catches false live-command findings inside non-executable heredoc text."""
+        with tempfile.TemporaryDirectory() as temporary:
+            validator = Path(temporary) / "validator.sh"
+            validator.write_text(
+                "# adb root is documentation, not an executable command\n"
+                "python3 - <<'PY'\n"
+                "adb root\n"
+                "python3 tools/apple_tv_codec_probe.py probe\n"
+                "PY\n"
+                "python3 -m unittest -v tools/tests/test_apple_tv_codec_probe.py\n",
+                encoding="utf-8",
+            )
+
+            commands = self._validator_commands(validator)
+
+        self.assertIn(self.harness_command, commands)
+        self.assertFalse(any(self._is_live_device_command(command) for command in commands))
+
+    def test_repository_validation_never_schedules_live_device_commands(self):
+        """Catches live commands in workflow, validator, or product recipe sources."""
         paths_and_commands = [
             (
                 ".github/workflows/android15-port-validation.yml",
                 self._workflow_commands(
                     self.repo_root / ".github/workflows/android15-port-validation.yml"
                 ),
-            )
+            ),
+            (
+                "tools/check-android15-port.sh",
+                self._validator_commands(self.repo_root / "tools/check-android15-port.sh"),
+            ),
         ]
         product_root = self.repo_root / "aosptree/vendor/devices-community/gd_rpi4"
         paths_and_commands.extend(
@@ -530,16 +698,7 @@ class RepositoryIntegrationTests(unittest.TestCase):
         for path, commands in paths_and_commands:
             for command in commands:
                 with self.subTest(path=path, command=command):
-                    probe_index = next(
-                        (
-                            index
-                            for index, argument in enumerate(command)
-                            if argument.endswith("tools/apple_tv_codec_probe.py")
-                        ),
-                        None,
-                    )
-                    if probe_index is not None:
-                        self.assertNotIn("probe", command[probe_index + 1 :])
+                    self.assertFalse(self._is_live_device_command(command))
 
     def test_product_codec_contract_remains_hardware_scoped_without_framework_hook(self):
         """Catches a global software AVC override or Apple-specific framework behavior."""
