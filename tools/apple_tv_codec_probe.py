@@ -389,7 +389,7 @@ _HEADER_SECRET_PREFIX = re.compile(
 )
 _FIELD_SECRET_PREFIX = re.compile(
     r"(?i)\b(?:account|email|token|licenseRequest|licenseResponse|keySetId|drmPayload|"
-    r"device_id|provisioning_id|object[ _]nonce|nonce|(?:log[-_])?session(?:[-_]?id)?|credentials?|"
+    r"device_id|provisioning_id|object[ _]nonce|nonce|(?:log[-_]?)?session(?:[-_]?id)?|credentials?|"
     r"password|cookie|payload|android\.media\.mediacodec\.id)\b"
     r"(?:[\"']?\s*(?:=|:)\s*)"
 )

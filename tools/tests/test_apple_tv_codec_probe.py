@@ -534,6 +534,20 @@ class NativeEvidenceTest(unittest.TestCase):
         for secret in ("fake-device", "fake-provisioning", "fake-nonce", "fake-session", "fake-credential", "fake-cookie", "fake-payload", "fake-codec-session", "fake-log-session"):
             self.assertNotIn(secret, redacted)
 
+    def test_camelcase_audio_log_session_is_redacted_without_losing_diagnostics(self):
+        # Catches a required separator after "log" missing Android camelCase IDs.
+        text = ("logSessionId=fake-audio-log-session "
+                "package=com.apple.atve.androidtv.appletv mime=video/avc "
+                "component=c2.ffmpeg.avc.decoder cpu=80 error=42\n"
+                "catalogSessionId=public-label sessionCount=2")
+        redacted = redact_diagnostic_text(text)
+        self.assertNotIn("fake-audio-log-session", redacted)
+        self.assertIn("logSessionId=[REDACTED]", redacted)
+        for diagnostic in ("package=com.apple.atve.androidtv.appletv", "mime=video/avc",
+                           "component=c2.ffmpeg.avc.decoder", "cpu=80", "error=42",
+                           "catalogSessionId=public-label", "sessionCount=2"):
+            self.assertIn(diagnostic, redacted)
+
     def test_json_session_values_are_redacted_at_persistence_boundary(self):
         with tempfile.TemporaryDirectory() as temporary:
             probe.write_json(Path(temporary), "events.json", [{"session_id": "fake-json-session", "codec": "c2.ffmpeg.avc.decoder"}])
@@ -1090,7 +1104,8 @@ class AdbOrchestrationTest(unittest.TestCase):
                    "object nonce": "fake-nonce", "session_id": "fake-session", "session": "fake-session-short",
                    "credentials": "fake-credentials", "token": "fake-token", "cookie": "fake-cookie",
                    "payload": "fake-payload", "android.media.mediacodec.id": "fake-native-id",
-                   "android.media.mediacodec.log-session-id": "fake-native-log-session"}
+                   "android.media.mediacodec.log-session-id": "fake-native-log-session",
+                   "logSessionId": "fake-audio-log-session"}
         diagnostics = "\n".join("MediaCodec " + key + "='" + value + "'" for key, value in secrets.items())
         diagnostics += "\n" + native_sample()
         self.runner.queue(("dumpsys", "media.metrics"), *(subprocess.CompletedProcess([], 0, diagnostics, "") for _ in range(3)))
