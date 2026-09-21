@@ -197,13 +197,18 @@ def _native_codec_sample(line):
         return None
     fields = {}
     for item in body.split(","):
-        match = re.fullmatch(r"\s*android\.media\.mediacodec\.([a-z_-]+)\s*=\s*([^,]*)", item)
+        match = re.fullmatch(
+            r"""\s*([A-Za-z][A-Za-z0-9_.-]*)\s*=\s*("[^"]*"|'[^']*'|[^"']*)\s*""", item)
         if not match:
-            continue
+            return None
         name, value = match.groups()
+        if not name.startswith("android.media.mediacodec."):
+            continue
+        name = name.removeprefix("android.media.mediacodec.")
         if name in fields:
             return None
-        fields[name] = value.strip().strip("\"'")
+        value = value.strip()
+        fields[name] = value[1:-1] if value.startswith(("\"", "'")) else value
     codec = fields.get("component") or fields.get("codec", "")
     if "component" in fields and "codec" in fields and fields["component"] != fields["codec"]:
         return None

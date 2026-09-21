@@ -449,6 +449,39 @@ class NativeEvidenceTest(unittest.TestCase):
         for field in ("crypto=1", "encrypted=true", "secure=yes"):
             self.assertEqual(len(parse_codec_events(native_sample().replace("crypto=1", field))), 1)
 
+    def test_native_rejects_unbalanced_or_embedded_field_quotes(self):
+        # Catches normalization that strips quotes from malformed evidence.
+        for original, replacement in (
+            ("crypto=1", 'crypto="1'),
+            ("crypto=1", "crypto='1"),
+            ("crypto=1", 'crypto=1"'),
+            ("crypto=1", "crypto=\"1'"),
+            ("id=fake-codec-session", 'id="fake-session'),
+            ("id=fake-codec-session", 'id=fake"session'),
+        ):
+            with self.subTest(replacement=replacement):
+                self.assertEqual(parse_codec_events(native_sample().replace(original, replacement)), [])
+
+    def test_native_rejects_malformed_field_fragments_even_after_valid_crypto(self):
+        # Catches silently discarding an ambiguous contradictory field.
+        for fragment in ("android.media.mediacodec.crypto:0",
+                         "android.media.mediacodec.secure:false",
+                         "android.media.mediacodec.crypto",
+                         "android.media.mediacodec.id:'fake-other-session'"):
+            with self.subTest(fragment=fragment):
+                text = native_sample().replace(")}", ", " + fragment + ")}")
+                self.assertEqual(parse_codec_events(text), [])
+
+    def test_native_preserves_balanced_quoted_fields_and_valid_unknown_fields(self):
+        for quote in ("'", '"'):
+            text = native_sample().replace("crypto=1", "crypto=" + quote + "1" + quote)
+            text = text.replace("id=fake-codec-session", "id=" + quote + "fake-codec-session" + quote)
+            text = text.replace(")}", ", vendor.example=non-sensitive)}")
+            events = parse_codec_events(text)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].session_id, "fake-codec-session")
+            self.assertTrue(events[0].encrypted)
+
     def test_single_native_aggregate_cannot_claim_prior_progress(self):
         observation = classify_observation(parse_codec_events(native_sample(position="9000")))
         self.assertEqual(observation.outcome, ProbeOutcome.UNUSABLE_LOAD)
