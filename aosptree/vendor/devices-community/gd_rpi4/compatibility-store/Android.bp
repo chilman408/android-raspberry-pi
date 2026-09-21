@@ -1,0 +1,11 @@
+android_app_import {
+    name: "AuroraStorePreload",
+    owner: "auroraoss",
+    apk: "AuroraStore-preload-4.8.4.apk",
+    presigned: true,
+    preprocessed: true,
+    product_specific: true,
+    dex_preopt: {
+        enabled: false,
+    },
+}

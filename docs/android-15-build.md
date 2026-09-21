@@ -30,6 +30,27 @@ Successful runs upload:
 
 The workflow can optionally publish the same files as a GitHub prerelease.
 
+## Compatibility Store (Aurora)
+
+Google Play remains installed and is the primary store. Aurora Store is also
+preloaded as an optional compatibility store. Its upstream first-run flow
+requires you to accept its terms and choose anonymous or personal login.
+
+Within Aurora, you can select an ARM64 Android-compatible catalog profile
+without changing the global Android identity. Application availability varies
+by profile, account region, and upstream service behavior. Paid applications
+and applications available only through Play Asset Delivery are unsupported.
+
+Catalog visibility and successful installation do not establish protected
+playback support. Installing an application does not create Play certification,
+Play Integrity, Widevine L1, or HDCP support; protected playback must be tested
+separately on the device and display.
+
+The artifact version, upstream source, signer, and license are recorded in
+[`compatibility-store/NOTICE.md`](../aosptree/vendor/devices-community/gd_rpi4/compatibility-store/NOTICE.md).
+The build preserves the upstream APK signature and installs Aurora as an
+ordinary product app.
+
 ## Credentials
 
 Without repository secrets, the workflow intentionally creates a development

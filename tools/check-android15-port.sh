@@ -88,6 +88,9 @@ fi
 if ! python3 -m unittest -v tools/tests/test_android15_build_cache.py; then
   failures=$((failures + 1))
 fi
+if ! python3 -m unittest -v tools/tests/test_android15_aurora_store.py; then
+  failures=$((failures + 1))
+fi
 if ! python3 -m unittest -v tools/tests/test_android15_ih8sn_patch.py; then
   failures=$((failures + 1))
 fi

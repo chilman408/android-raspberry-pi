@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import ast
 import copy
 import contextlib
 import dataclasses
@@ -9,6 +10,8 @@ import io
 import json
 import os
 import pathlib
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -743,6 +746,174 @@ class MaterializerTests(unittest.TestCase):
             self.assertLess(gapps_index, materializer_index)
             self.assertLess(materializer_index, patch_index)
             self.assertEqual(events[materializer_index], "materializer --aosp-root aosptree")
+
+
+class ProductIntegrationTests(unittest.TestCase):
+    """Shipping policy: preserve the upstream signer and limit product authority."""
+
+    baseline = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v4"
+
+    def app_properties(self):
+        path = REPOSITORY_LOCK.with_name("Android.bp")
+        self.assertTrue(path.is_file(), "missing Aurora product module")
+        source = path.read_text(encoding="utf-8")
+        source = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/',
+                        lambda match: match[0] if match[0].startswith('"') else "", source,
+                        flags=re.DOTALL)
+        module = re.fullmatch(r"\s*android_app_import\s*(\{.*\})\s*", source, re.DOTALL)
+        self.assertIsNotNone(module, "expected one android_app_import module")
+        properties = re.sub(r"\b([A-Za-z_]\w*)\s*:", r'"\1":', module[1])
+        properties = re.sub(r",\s*([}\]])", r"\1", properties)
+
+        def unique_properties(pairs):
+            result = {}
+            for key, value in pairs:
+                self.assertNotIn(key, result, f"duplicate Soong property: {key}")
+                result[key] = value
+            return result
+
+        return json.loads(properties, object_pairs_hook=unique_properties)
+
+    @staticmethod
+    def workflow_runs(relative_path):
+        """Read inline and literal/folded run scalars without depending on PyYAML."""
+        lines = (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()
+        runs = []
+        for index, line in enumerate(lines):
+            match = re.match(r"^(\s*)run:\s*(.*?)\s*$", line)
+            if not match:
+                continue
+            value = match[2]
+            if value in ("|", ">", "|-", ">-"):
+                block = []
+                for following in lines[index + 1:]:
+                    if following.strip() and len(following) - len(following.lstrip()) <= len(match[1]):
+                        break
+                    block.append(following.strip())
+                value = "\n".join(block)
+            runs.append(value)
+        return runs
+
+    def test_product_import_preserves_signed_apk_without_preoptimization(self):
+        """Re-signing, changing the binary, or transforming its dex breaks the preload."""
+        properties = self.app_properties()
+        for key, expected in {
+            "name": "AuroraStorePreload",
+            "apk": "AuroraStore-preload-4.8.4.apk",
+            "presigned": True,
+            "preprocessed": True,
+            "product_specific": True,
+            "dex_preopt": {"enabled": False},
+        }.items():
+            with self.subTest(property=key):
+                self.assertEqual(properties.get(key), expected)
+
+    def test_product_import_cannot_gain_platform_or_privileged_authority(self):
+        """Signing overrides, privileged placement, and Aurora Services are forbidden."""
+        properties = self.app_properties()
+        self.assertNotIn("certificate", properties)
+        for key in ("privileged", "system_ext_specific", "vendor"):
+            self.assertFalse(properties.get(key, False), key)
+        self.assertNotRegex(json.dumps(properties).lower(), r"aurora[._ -]*services")
+
+    def test_product_includes_store_once_without_identity_or_permission_overrides(self):
+        """Duplicate/absent inclusion or identity/grant changes violate the app boundary."""
+        source = REPOSITORY_LOCK.parent.parent.joinpath("device.mk").read_text(encoding="utf-8")
+        source = re.sub(r"\\\r?\n", " ", source)
+        assignments = []
+        for line in source.splitlines():
+            line = line.split("#", 1)[0]
+            match = re.match(r"\s*(\w+)\s*(\+=|:=|\?=|=)\s*(.*)", line)
+            if match:
+                assignments.append((match[1], match[2], match[3].split()))
+        packages = [token for key, _, values in assignments if key == "PRODUCT_PACKAGES" for token in values]
+        self.assertEqual(packages.count("AuroraStorePreload"), 1)
+        for key, operator, values in assignments:
+            if "AuroraStorePreload" in values:
+                self.assertEqual((key, operator), ("PRODUCT_PACKAGES", "+="))
+            for value in values:
+                self.assertNotRegex(value.lower(), r"ro\.product[.=]|ro\.build\.fingerprint|ih8sn|aurora[._-]*services|privapp-permissions|default-permissions|play.*certif")
+            self.assertNotIn(key, ("PRODUCT_DEFAULT_DEV_CERTIFICATE", "PRODUCT_CERTIFICATE_OVERRIDES"))
+
+    def test_build_workflow_prepares_sources_before_every_image_build(self):
+        """Building before source preparation bypasses the verified materializer."""
+        commands = [match[1] for run in self.workflow_runs(".github/workflows/build-android15-rpi4.yml")
+                    for match in re.finditer(r"(?:^|[;\n])\s*bash\s+([^\s;]+)", run)]
+        preparations = [index for index, command in enumerate(commands) if command == "unfold_aosp.sh"]
+        builds = [index for index, command in enumerate(commands) if command == "build_rpi4.sh"]
+        self.assertTrue(preparations, "missing source preparation")
+        self.assertTrue(builds, "missing image build")
+        for index in builds:
+            self.assertLess(preparations[0], index)
+
+    def test_validation_workflow_runs_full_aurora_module(self):
+        """Removing PR coverage must not let binary-policy drift through validation."""
+        commands = [shlex.split(line, comments=True) for run in self.workflow_runs(
+            ".github/workflows/android15-port-validation.yml") for line in run.splitlines()
+            if re.match(r"\s*python3\s", line)]
+        self.assertTrue(any(command[:3] == ["python3", "-m", "unittest"] and
+                            any(argument in ("tools/tests/test_android15_aurora_store.py",
+                                             "tools.tests.test_android15_aurora_store") for argument in command[3:])
+                            for command in commands), "validation must run the full Aurora module")
+
+    def test_port_gate_runs_aurora_and_counts_its_failure(self):
+        """An Aurora failure must make the actual repository gate exit unsuccessfully."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            fake_bin = directory / "bin"
+            log = directory / "python-calls.log"
+            MaterializerTests.write_executable(fake_bin / "python3", """
+                #!/bin/sh
+                printf '%s\\n' "$*" >> "$GATE_CALLS"
+                for argument in "$@"; do
+                    case "$argument" in
+                        tools/tests/test_android15_aurora_store.py|tools.tests.test_android15_aurora_store)
+                            exit "$AURORA_STATUS" ;;
+                    esac
+                done
+                cat >/dev/null
+            """)
+            environment = os.environ.copy()
+            environment["FAKE_BIN_BASH"] = MaterializerTests.bash_path(fake_bin)
+            environment["GATE_CALLS"] = MaterializerTests.bash_path(log)
+            for status in ("0", "1"):
+                with self.subTest(aurora_status=status):
+                    environment["AURORA_STATUS"] = status
+                    result = subprocess.run([
+                        str(GIT_BASH), "-c",
+                        'export PATH="$FAKE_BIN_BASH:$PATH"; exec bash tools/check-android15-port.sh',
+                    ], cwd=REPO_ROOT, env=environment, input="", text=True,
+                        capture_output=True, check=False)
+                    calls = [shlex.split(line) for line in log.read_text(encoding="utf-8").splitlines()]
+                    log.unlink()
+                    aurora_calls = [call for call in calls if any(argument in (
+                        "tools/tests/test_android15_aurora_store.py", "tools.tests.test_android15_aurora_store")
+                        for argument in call)]
+                    self.assertEqual(len(aurora_calls), 1, "gate must invoke the full Aurora module once")
+                    self.assertEqual(aurora_calls[0][:2], ["-m", "unittest"])
+                    self.assertEqual(result.returncode, int(status), result.stdout + result.stderr)
+
+    def test_build_baseline_invalidates_previous_product_cache(self):
+        """Reusing the old image cache can silently omit the new product app."""
+        spec = importlib.util.spec_from_file_location("check_build_cache", REPO_ROOT / "tools/check-android15-build-cache.py")
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        workflow = REPO_ROOT / ".github/workflows/build-android15-rpi4.yml"
+        helper = REPO_ROOT / "tools/android-build-cache.sh"
+        self.assertEqual(checker.validate_contract(workflow, helper), [])
+        baseline_values = re.findall(r"(?m)^\s*ANDROID_BUILD_BASELINE:\s*(\S+)\s*$", workflow.read_text(encoding="utf-8"))
+        self.assertEqual(baseline_values, [self.baseline])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stale = pathlib.Path(temp_dir) / "stale.yml"
+            stale.write_text(workflow.read_text(encoding="utf-8").replace(self.baseline, self.baseline.removesuffix("4") + "3"), encoding="utf-8")
+            self.assertTrue(checker.validate_contract(stale, helper), "validator accepted stale product baseline")
+        for relative in ("tools/check-android15-build-cache.py", "tools/tests/test_android15_build_cache.py",
+                         "tools/tests/test_android15_runtime_performance.py"):
+            with self.subTest(consumer=relative):
+                tree = ast.parse((REPO_ROOT / relative).read_text(encoding="utf-8"))
+                values = [node.value.value for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id in ("BASELINE", "RUNTIME_BASELINE") for target in node.targets)]
+                self.assertEqual(values, [self.baseline])
 
 
 if __name__ == "__main__":

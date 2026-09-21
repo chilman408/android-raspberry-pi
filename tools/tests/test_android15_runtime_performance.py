@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 TESLA_ANDROID_2026_22_1_VENDOR = "6e139bf41585188308e053dcbb34855f644aedba"
-RUNTIME_BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v3"
+RUNTIME_BASELINE = "android-platform-15.0.0_r3-tesla-2026.22.1-runtime-v4"
 USERDATA_PATCH = (
     REPO_ROOT
     / "patches-aosp"

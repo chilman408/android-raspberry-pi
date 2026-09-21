@@ -111,3 +111,6 @@ PRODUCT_VENDOR_PROPERTIES +=    \
 
 # Default apps
 GD_NO_DEFAULT_APPS = false
+
+PRODUCT_PACKAGES += \
+    AuroraStorePreload
