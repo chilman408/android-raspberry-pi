@@ -393,6 +393,122 @@ class AppleTvCodecProbeTest(unittest.TestCase):
         self.assertEqual(getattr(observation, "media_progress_seconds", None), 600)
 
 
+def native_sample(stamp="09-20 12:00:00.000", position="720"):
+    # Sanitized literal aggregate shape with a deliberately fictitious ID.
+    return (f"{{codec, ({stamp}), ({APPLE_PACKAGE}, 0, 12345), ("
+            "android.media.mediacodec.codec=c2.ffmpeg.avc.decoder, "
+            "android.media.mediacodec.mime=video/avc, "
+            "android.media.mediacodec.id=fake-codec-session, "
+            "android.media.mediacodec.crypto=1, "
+            f"android.media.mediacodec.playback-duration-sec={position})}}")
+
+
+class NativeEvidenceTest(unittest.TestCase):
+    def test_explicit_native_records_normalize_to_samples(self):
+        # Catches dropping either record kind or losing explicit facts.
+        for record in ("codec", "mediametrics_codec_reported"):
+            with self.subTest(record=record):
+                events = parse_codec_events(native_sample().replace("{codec,", "{" + record + ","))
+                self.assertEqual(len(events), 1)
+                event = events[0]
+                self.assertEqual((event.package, event.mime, event.codec, event.encrypted,
+                                  event.event, event.session_id, event.position_seconds),
+                                 (APPLE_PACKAGE, "video/avc", "c2.ffmpeg.avc.decoder",
+                                  True, "sample", "fake-codec-session", 720.0))
+                later = parse_codec_events(native_sample("09-20 12:00:10.000", "730"))[0]
+                self.assertEqual(later.timestamp - event.timestamp, 10)
+
+    def test_native_fields_fail_closed(self):
+        valid = native_sample()
+        invalid = [
+            valid.replace("android.media.mediacodec.crypto=1, ", ""),
+            valid.replace("crypto=1", "crypto=-1"),
+            valid.replace("crypto=1", "crypto=1, android.media.mediacodec.secure=false"),
+            valid.replace("crypto=1", "crypto=0, android.media.mediacodec.encrypted=true"),
+            valid.replace("android.media.mediacodec.id=fake-codec-session, ", ""),
+            valid.replace(", android.media.mediacodec.playback-duration-sec=720", ""),
+            valid.replace("video/avc", "video/hevc"),
+            valid.replace("c2.ffmpeg.avc.decoder", "c2.ffmpeg.hevc.decoder"),
+            valid.replace("c2.ffmpeg.avc.decoder", "not-a-component"),
+            valid.replace(APPLE_PACKAGE, APPLE_PACKAGE + ".other"),
+            valid.replace(APPLE_PACKAGE, ""),
+            valid.replace("{codec,", "{drm,"),
+            valid.replace("09-20 12:00:00.000", "99-99 99:99:99.999"),
+            valid.replace("09-20 12:00:00.000", ""),
+            valid.replace("crypto=1", "crypto=1, android.media.mediacodec.crypto=0"),
+            valid.replace("crypto=1", "crypto=1, android.media.mediacodec.component=c2.ffmpeg.hevc.decoder"),
+            valid.replace("codec=c2.ffmpeg.avc.decoder", "codec=c2.ffmpeg.hevc.decoder, android.media.mediacodec.component=c2.ffmpeg.avc.decoder"),
+        ]
+        invalid += [valid.replace("duration-sec=720", "duration-sec=" + value)
+                    for value in ("-1", "nan", "inf", "unknown", "9" * 400)]
+        for text in invalid:
+            with self.subTest(text=text):
+                self.assertEqual(parse_codec_events(text), [])
+
+    def test_native_explicit_true_crypto_aliases(self):
+        for field in ("crypto=1", "encrypted=true", "secure=yes"):
+            self.assertEqual(len(parse_codec_events(native_sample().replace("crypto=1", field))), 1)
+
+    def test_single_native_aggregate_cannot_claim_prior_progress(self):
+        observation = classify_observation(parse_codec_events(native_sample(position="9000")))
+        self.assertEqual(observation.outcome, ProbeOutcome.UNUSABLE_LOAD)
+        self.assertEqual(observation.continuous_seconds, 0)
+        self.assertEqual(observation.media_progress_seconds, 0)
+        self.assertEqual(observation.restart_count, 0)
+
+    def test_native_sample_span_requires_later_contiguous_media_progress(self):
+        text = "\n".join(native_sample(f"09-20 12:{s // 60:02}:{s % 60:02}.000", str(720 + s))
+                         for s in range(0, 601, 10))
+        observation = classify_observation(parse_codec_events(text))
+        self.assertEqual(observation.outcome, ProbeOutcome.PLAYED_600_SECONDS)
+        self.assertEqual(observation.continuous_seconds, 600)
+        self.assertEqual(observation.media_progress_seconds, 600)
+        self.assertEqual(observation.restart_count, 0)
+
+    def test_native_samples_do_not_join_sessions_or_invent_restarts(self):
+        for mode in ("single", "stall", "seek", "reset", "gap", "session", "codec"):
+            text = []
+            for s in range(0, 601, 10):
+                position = 720 if mode == "stall" else 720 + 2 * s if mode == "seek" else s % 310 if mode == "reset" else 720 + s
+                line = native_sample(f"09-20 12:{s // 60:02}:{s % 60:02}.000", str(position))
+                if mode == "session" and s >= 300:
+                    line = line.replace("fake-codec-session", "fake-other-session")
+                if mode == "codec" and s >= 300:
+                    line = line.replace("c2.ffmpeg.avc.decoder", "c2.v4l2.avc.decoder")
+                if (mode == "single" and s) or (mode == "gap" and s == 300):
+                    continue
+                text.append(line)
+            with self.subTest(mode=mode):
+                observation = classify_observation(parse_codec_events("\n".join(text)))
+                self.assertEqual(observation.outcome, ProbeOutcome.UNUSABLE_LOAD)
+                self.assertEqual(observation.restart_count, 0)
+                self.assertLess(observation.media_progress_seconds, 600)
+
+    def test_native_widevine_labels_select_only_security_facts(self):
+        self.assertEqual(parse_widevine_state(
+            "default_security_level: 'L3'\noemcrypto_build_info: 'OEMCrypto Level3 fake-build'\n"
+            "hdcp_level_current: 'Unprotected'\nhdcp_level_max: 'Unprotected'\n"
+            "device_id: 'fake-device'\nprovisioning_id: 'fake-provisioning'\n"),
+            {"securityLevel": "L3", "OEMCrypto": "OEMCrypto Level3 fake-build",
+             "currentHdcpLevel": "Unprotected", "maximumHdcpLevel": "Unprotected"})
+
+    def test_native_identifiers_and_credentials_are_redacted(self):
+        text = ("MediaCodec device_id='fake-device' provisioning_id='fake-provisioning' "
+                "object nonce='fake-nonce' session_id='fake-session' credentials='fake-credential' "
+                "cookie='fake-cookie' payload='fake-payload'\n"
+                "MediaCodec android.media.mediacodec.log-session-id='fake-log-session'\n" + native_sample())
+        redacted = redact_diagnostic_text(text)
+        for secret in ("fake-device", "fake-provisioning", "fake-nonce", "fake-session", "fake-credential", "fake-cookie", "fake-payload", "fake-codec-session", "fake-log-session"):
+            self.assertNotIn(secret, redacted)
+
+    def test_json_session_values_are_redacted_at_persistence_boundary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            probe.write_json(Path(temporary), "events.json", [{"session_id": "fake-json-session", "codec": "c2.ffmpeg.avc.decoder"}])
+            text = (Path(temporary) / "events.json").read_text()
+            self.assertNotIn("fake-json-session", text)
+            self.assertEqual(json.loads(text)[0]["codec"], "c2.ffmpeg.avc.decoder")
+
+
 class RepositoryIntegrationTests(unittest.TestCase):
     """Repository contracts that keep the Apple diagnostics fixture-only."""
 
@@ -818,10 +934,14 @@ class RecordingRunner:
             output = f"boot-{self.boot}"
         elif cmd == ("cmd", "package", "list", "packages", APPLE_PACKAGE):
             output = f"package:{APPLE_PACKAGE}"
+        elif cmd[:4] == ("cmd", "package", "list", "packages") and cmd[4] in ("com.netflix.ninja", "com.netflix.mediaclient"):
+            output = "package:com.netflix.ninja" if cmd[4] == "com.netflix.ninja" else ""
         elif cmd == ("dumpsys", "media.player"):
             output = ("name: c2.ffmpeg.avc.decoder rank: 16\n" if self.software else "") + ("name: c2.v4l2.avc.decoder rank: 128\n" if self.hardware else "")
         elif cmd == ("dumpsys", "media.drm"):
             output = 'security level: L3\nOEMCrypto: Level 3\nCurrent HDCP level: Unprotected\nlicenseResponse={"secret":"never-persist"}'
+        elif cmd == ("dumpsys", "android.hardware.drm.IDrmFactory/widevine"):
+            return subprocess.CompletedProcess(args, 1, "", "service unavailable")
         elif cmd[:2] == ("dumpsys", "package"):
             output = "versionCode=101\nversionName=1.2.3\naccount=private-account"
         elif cmd == ("dumpsys", "media.metrics"):
@@ -854,6 +974,8 @@ class RecordingRunner:
         if not self.started or self.mode in ("none", "needs_tap"):
             return ""
         elapsed = self.clock.now - self.started_at
+        if self.mode == "native":
+            return native_sample(f"09-20 12:{int(elapsed // 60):02}:{elapsed % 60:06.3f}", str(720 + elapsed))
         codec = "c2.v4l2.avc.decoder" if self.mode == "restart" else "c2.ffmpeg.avc.decoder"
         def line(stamp, session, event):
             position = max(0, stamp - (140 if session == "two" else 100))
@@ -899,6 +1021,112 @@ class AdbOrchestrationTest(unittest.TestCase):
         self.assertFalse(any(c[3] in ("root", "reboot") for c in self.runner.commands if len(c) > 3))
 
     # Each test catches removal of the named safety branch or observable effect.
+    def test_baseline_discovers_exact_netflix_package_and_records_version(self):
+        cases = (("package:com.netflix.ninja", "package:com.netflix.mediaclient", "com.netflix.ninja"),
+                 ("package:com.netflix.ninja.extra", "package:com.netflix.mediaclient", "com.netflix.mediaclient"),
+                 ("", "package:com.netflix.mediaclient.extra", None))
+        for index, (ninja, mobile, selected) in enumerate(cases):
+            with self.subTest(selected=selected):
+                self.runner = RecordingRunner(self.clock)
+                self.output = Path(self.tmp.name) / f"netflix-{index}"
+                for package, response in (("com.netflix.ninja", ninja), ("com.netflix.mediaclient", mobile)):
+                    self.runner.queue(("cmd", "package", "list", "packages", package), subprocess.CompletedProcess([], 0, response, ""))
+                self.assertEqual(self.cli("baseline"), 0)
+                data = json.loads((self.output / "baseline.json").read_text())
+                self.assertEqual(data.get("netflix_package", "missing"), selected)
+                version = (self.output / "netflix-version.txt").read_text()
+                if selected:
+                    self.assertIn("package=" + selected, version)
+                    self.assertIn("versionCode=101", version)
+                    self.assertIn("versionName=1.2.3", version)
+                else:
+                    self.assertNotIn("versionCode", version)
+                queries = [shlex.split(" ".join(c[4:])) for c in self.runner.commands if len(c) > 4 and c[4] == "cmd"]
+                self.assertEqual(queries, [["cmd", "package", "list", "packages", "com.netflix.ninja"]] +
+                                 ([] if selected == "com.netflix.ninja" else [["cmd", "package", "list", "packages", "com.netflix.mediaclient"]]))
+                self.assert_no_mutation()
+                self.assertFalse(any(c[3:5] == ["shell", "am"] for c in self.runner.commands))
+
+    def test_baseline_prefers_native_widevine_and_never_persists_sensitive_ids(self):
+        factory = ("default_security_level: 'L3'\noemcrypto_build_info: 'OEMCrypto Level3 fake-build'\n"
+                   "hdcp_level_current: 'Unprotected'\nhdcp_level_max: 'Unprotected'\n"
+                   "device_id: 'fake-factory-device'\nprovisioning_id: 'fake-factory-provisioning'\n"
+                   "object nonce: 'fake-factory-nonce'\n")
+        self.runner.queue(("dumpsys", "android.hardware.drm.IDrmFactory/widevine"), subprocess.CompletedProcess([], 0, factory, ""))
+        secrets = {"device_id": "fake-device", "provisioning_id": "fake-provisioning",
+                   "object nonce": "fake-nonce", "session_id": "fake-session", "session": "fake-session-short",
+                   "credentials": "fake-credentials", "token": "fake-token", "cookie": "fake-cookie",
+                   "payload": "fake-payload", "android.media.mediacodec.id": "fake-native-id",
+                   "android.media.mediacodec.log-session-id": "fake-native-log-session"}
+        diagnostics = "\n".join("MediaCodec " + key + "='" + value + "'" for key, value in secrets.items())
+        diagnostics += "\n" + native_sample()
+        self.runner.queue(("dumpsys", "media.metrics"), *(subprocess.CompletedProcess([], 0, diagnostics, "") for _ in range(3)))
+        self.assertEqual(self.cli("baseline"), 0)
+        baseline = json.loads((self.output / "baseline.json").read_text())
+        self.assertEqual(baseline["widevine"], {"securityLevel": "L3", "OEMCrypto": "OEMCrypto Level3 fake-build",
+                                              "currentHdcpLevel": "Unprotected", "maximumHdcpLevel": "Unprotected"})
+        self.assertNotIn(["adb", "-s", self.runner.serial, "shell", "dumpsys", "media.drm"], self.runner.commands)
+        for artifact in self.output.iterdir():
+            for secret in (*secrets.values(), "fake-factory-device", "fake-factory-provisioning", "fake-factory-nonce", "fake-codec-session"):
+                self.assertNotIn(secret, artifact.read_text(), (artifact.name, secret))
+
+    def test_baseline_widevine_falls_back_on_missing_service_or_unrecognized_dump(self):
+        for index, response in enumerate((subprocess.CompletedProcess([], 1, "", "missing"),
+                                          subprocess.CompletedProcess([], 0, "Can't find service", ""),
+                                          subprocess.TimeoutExpired("adb", 30))):
+            self.runner = RecordingRunner(self.clock)
+            self.output = Path(self.tmp.name) / f"fallback-{index}"
+            self.runner.queue(("dumpsys", "android.hardware.drm.IDrmFactory/widevine"), response)
+            self.assertEqual(self.cli("baseline"), 0)
+            baseline = json.loads((self.output / "baseline.json").read_text())
+            self.assertEqual(baseline["widevine"]["securityLevel"], "L3")
+            dumps = [c[-1] for c in self.runner.commands if c[3:5] == ["shell", "dumpsys"]]
+            self.assertIn("android.hardware.drm.IDrmFactory/widevine", dumps)
+            self.assertLess(dumps.index("android.hardware.drm.IDrmFactory/widevine"), dumps.index("media.drm"))
+
+    def test_diagnostic_failure_retains_other_source_and_sanitizes_marker(self):
+        commands = (("dumpsys", "media.metrics"),
+                    ("logcat", "-d", "-v", "monotonic", "-s", "MediaMetrics:I", "MediaCodec:I", "CCodec:I", "AndroidRuntime:E", "ActivityManager:I", "*:S"))
+        for index, command in enumerate(commands):
+            for failure in (subprocess.TimeoutExpired("fake-secret-command", 1, output="fake-secret-output"),
+                            subprocess.CompletedProcess([], 1, "", "fake-secret-error")):
+                self.runner = RecordingRunner(self.clock)
+                self.runner.queue(command, failure)
+                self.runner.queue(commands[1 - index], subprocess.CompletedProcess([], 0, "MediaCodec retained-other-source", ""))
+                try:
+                    text = probe.read_codec_evidence(probe.AdbClient(self.runner.serial, self.runner))
+                except probe.ProbeError:
+                    self.fail("a diagnostic failure aborted the independent source")
+                self.assertIn("retained-other-source", text)
+                self.assertIn("diagnostic_unavailable source=" + ("media.metrics" if index == 0 else "logcat"), text)
+                self.assertNotIn("fake-secret", text)
+
+    def test_observe_diagnostic_timeouts_are_safe_negative_without_mutation(self):
+        self.runner.mode = "none"
+        self.runner.ui = "<hierarchy/>"
+        for command in (("dumpsys", "media.metrics"),
+                        ("logcat", "-d", "-v", "monotonic", "-s", "MediaMetrics:I", "MediaCodec:I", "CCodec:I", "AndroidRuntime:E", "ActivityManager:I", "*:S")):
+            self.runner.queue(command, *(subprocess.TimeoutExpired("fake-sensitive-command", 1) for _ in range(30)))
+        self.assertEqual(self.cli("observe", 600), 0)
+        result = json.loads((self.output / "result.json").read_text())
+        self.assertEqual(result["observation"]["outcome"], "NO_ENCRYPTED_AVC")
+        self.assert_no_mutation()
+        playback = (self.output / "playback.txt").read_text()
+        self.assertIn("diagnostic_unavailable source=media.metrics", playback)
+        self.assertIn("diagnostic_unavailable source=logcat", playback)
+        self.assertNotIn("fake-sensitive", playback)
+
+    def test_native_sample_progress_drives_watchdog_without_exposing_session(self):
+        self.runner.mode = "native"
+        self.assertEqual(self.cli("observe", 600), 0)
+        result = json.loads((self.output / "result.json").read_text())
+        self.assertEqual(result["observation"]["outcome"], "PLAYED_600_SECONDS")
+        self.assertEqual(result["observation"]["restart_count"], 0)
+        self.assertEqual(result["observation"]["media_progress_seconds"], 600)
+        self.assert_no_mutation()
+        for artifact in self.output.iterdir():
+            self.assertNotIn("fake-codec-session", artifact.read_text(), artifact.name)
+
     def test_aborts_before_root_or_setprop_when_multiple_devices_are_connected(self):
         self.runner.devices.append(("other", "device"))
         self.assertNotEqual(self.cli(), 0)

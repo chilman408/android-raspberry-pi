@@ -43,6 +43,7 @@ class CodecEvent:
     event: str
     session_id: str = field(default="", compare=False, repr=False)
     position_seconds: float | None = None
+    observed_sample: bool = False
 
 
 class ProbeOutcome(str, Enum):
@@ -96,6 +97,10 @@ def parse_codec_inventory(text: str) -> Sequence[str]:
 def parse_widevine_state(text: str) -> dict[str, str]:
     """Read explicitly reported Widevine security and HDCP fields."""
     labels = (
+        ("securityLevel", re.compile(r"^\s*default_security_level\s*:\s*'([^']*)'\s*$")),
+        ("OEMCrypto", re.compile(r"^\s*oemcrypto_build_info\s*:\s*'([^']*)'\s*$")),
+        ("currentHdcpLevel", re.compile(r"^\s*hdcp_level_current\s*:\s*'([^']*)'\s*$")),
+        ("maximumHdcpLevel", re.compile(r"^\s*hdcp_level_max\s*:\s*'([^']*)'\s*$")),
         ("securityLevel", re.compile(r"^\s*security\s*level\s*[:=]\s*(.+?)\s*$", re.I)),
         ("OEMCrypto", re.compile(r"^\s*OEMCrypto\s*[:=]\s*(.+?)\s*$", re.I)),
         (
@@ -136,6 +141,10 @@ def parse_codec_events(text: str) -> list[CodecEvent]:
     """Keep Apple TV encrypted AVC events having an explicit component name."""
     events: list[CodecEvent] = []
     for line in text.splitlines():
+        native = _native_codec_sample(line)
+        if native is not None:
+            events.append(native)
+            continue
         timestamp = _TIMESTAMP.match(line)
         if not timestamp:
             continue
@@ -165,6 +174,49 @@ def parse_codec_events(text: str) -> list[CodecEvent]:
             )
         )
     return events
+
+
+_NATIVE_RECORD = re.compile(
+    r"^\s*\{(?:codec|mediametrics_codec_reported),\s*\(([^()]+)\),\s*"
+    r"\(([^,()]+),\s*\d+,\s*\d+\),\s*\((.*)\)\}\s*$"
+)
+
+
+def _native_codec_sample(line):
+    """Accept explicit native facts only; cumulative counters are not lifetimes."""
+    record = _NATIVE_RECORD.fullmatch(line)
+    if not record:
+        return None
+    stamp, package, body = record.groups()
+    if package.strip() != APPLE_TV_PACKAGE:
+        return None
+    try:
+        # A fixed leap year gives a comparable clock, not an inferred event date.
+        timestamp = datetime.strptime("2000-" + stamp, "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+    fields = {}
+    for item in body.split(","):
+        match = re.fullmatch(r"\s*android\.media\.mediacodec\.([a-z_-]+)\s*=\s*([^,]*)", item)
+        if not match:
+            continue
+        name, value = match.groups()
+        if name in fields:
+            return None
+        fields[name] = value.strip().strip("\"'")
+    codec = fields.get("component") or fields.get("codec", "")
+    if "component" in fields and "codec" in fields and fields["component"] != fields["codec"]:
+        return None
+    session = fields.get("id", "")
+    position = _explicit_position(fields.get("playback-duration-sec"))
+    crypto = [fields[name].lower() for name in ("crypto", "encrypted", "secure") if name in fields]
+    if (fields.get("mime") != "video/avc" or not _COMPONENT.fullmatch(codec)
+            or "avc" not in codec.split(".") or "decoder" not in codec.split(".")
+            or not session or session.lower() in {"-1", "unknown", "null", "none"}
+            or position is None or not crypto or any(value not in {"1", "true", "yes"} for value in crypto)):
+        return None
+    return CodecEvent(timestamp, APPLE_TV_PACKAGE, "video/avc", codec, True, "sample",
+                      session, position, observed_sample=True)
 
 
 def _explicit_position(value):
@@ -199,6 +251,9 @@ class _MediaProgress:
             return False
         if event.event == "stop":
             self.active.pop(key, None)
+            return False
+        if event.event == "sample" and event.observed_sample and key not in self.active:
+            self.active[key] = (event.timestamp, position, 0.0, 0.0)
             return False
         if event.event != "sample" or key not in self.active:
             return False
@@ -239,6 +294,8 @@ def _closed_sessions(
                 )
             starts[event.codec] = starts.get(event.codec, 0) + 1
             active[session_key] = (event.timestamp, event.timestamp, False)
+        elif event.event == "sample" and event.observed_sample and session_key not in active:
+            active[session_key] = (event.timestamp, event.timestamp, True)
         elif session_key in active and event.event in {"sample", "stop"}:
             started, _latest, sampled = active[session_key]
             sampled = sampled or event.event == "sample"
@@ -326,7 +383,9 @@ _HEADER_SECRET_PREFIX = re.compile(
     r"(?i)\b(?:authorization|set-cookie|cookie)\s*:\s*"
 )
 _FIELD_SECRET_PREFIX = re.compile(
-    r"(?i)\b(?:account|email|token|licenseRequest|licenseResponse|keySetId|drmPayload)\b"
+    r"(?i)\b(?:account|email|token|licenseRequest|licenseResponse|keySetId|drmPayload|"
+    r"device_id|provisioning_id|object[ _]nonce|nonce|(?:log[-_])?session(?:[-_]?id)?|credentials?|"
+    r"password|cookie|payload|android\.media\.mediacodec\.id)\b"
     r"(?:[\"']?\s*(?:=|:)\s*)"
 )
 _DIAGNOSTIC_FIELD = re.compile(
@@ -562,7 +621,8 @@ def write_json(output_dir, name, value):
         if isinstance(item, str):
             return redact_diagnostic_text(item)
         if isinstance(item, dict):
-            return {key: sanitized(val) for key, val in item.items()}
+            return {key: REDACTED if _FIELD_SECRET_PREFIX.fullmatch(str(key) + "=") else sanitized(val)
+                    for key, val in item.items()}
         if isinstance(item, (list, tuple)):
             return [sanitized(val) for val in item]
         return item
@@ -573,6 +633,7 @@ def diagnostic_lines(text):
     """Persist only codec/process/load diagnostics, never complete service logs."""
     return "\n".join(line for line in text.splitlines() if re.search(
         r"c2\.|OMX\.|MediaCodec|MediaMetrics|CCodec|video/avc|" + re.escape(APPLE_TV_PACKAGE) +
+        r"|diagnostic_unavailable source=(?:media\.metrics|logcat)\b"
         r"|FATAL EXCEPTION|Thermal Status|Temperature\{|\bcpu\s*=|\bthermal\s*=", line))
 
 
@@ -588,7 +649,12 @@ def capture_baseline(client: AdbClient, output_dir: Path) -> ProbeState:
     state = ProbeState(client.serial, product, device, boot_id, properties, datetime.now(timezone.utc).isoformat())
     write_json(output_dir, "state.json", state.to_dict())
     player = client.shell("dumpsys", "media.player")
-    drm = client.shell("dumpsys", "media.drm")
+    try:
+        widevine = parse_widevine_state(client.shell("dumpsys", "android.hardware.drm.IDrmFactory/widevine"))
+    except ProbeError:
+        widevine = {}
+    if not widevine:
+        widevine = parse_widevine_state(client.shell("dumpsys", "media.drm"))
     metadata = {key: listing[key].value if key in listing else None for key in (
         "ro.product.model", "ro.build.fingerprint", "ro.build.type", "ro.boot.verifiedbootstate")}
     metadata["avc_components"] = [c for c in parse_codec_inventory(player) if ".avc." in c]
@@ -599,21 +665,30 @@ def capture_baseline(client: AdbClient, output_dir: Path) -> ProbeState:
         rank = re.search(r"\brank\s*[:=]\s*(\d+)", line, re.I)
         if component and rank:
             metadata["codec_ranks"][component.group(1)] = int(rank.group(1))
-    metadata["widevine"] = parse_widevine_state(drm)
+    metadata["widevine"] = widevine
+    netflix = None
+    for candidate in ("com.netflix.ninja", "com.netflix.mediaclient"):
+        installed = client.shell("cmd", "package", "list", "packages", candidate)
+        if "package:" + candidate in [line.strip() for line in installed.splitlines()]:
+            netflix = candidate
+            break
+    metadata["netflix_package"] = netflix
     write_json(output_dir, "baseline.json", metadata)
     write_evidence(output_dir, "codec-properties.txt", "\n".join(f"[{p.name}]: [{p.value}]" for p in properties.values() if p.present))
     write_evidence(output_dir, "media-player.txt", diagnostic_lines(player))
-    for package, filename in ((APPLE_TV_PACKAGE, "apple-version.txt"), ("com.netflix.ninja", "netflix-version.txt")):
-        package_dump = client.shell("dumpsys", "package", package)
-        write_evidence(output_dir, filename, "\n".join(line for line in package_dump.splitlines() if re.search(r"\bversion(?:Code|Name)=", line)))
+    for package, filename in ((APPLE_TV_PACKAGE, "apple-version.txt"), (netflix, "netflix-version.txt")):
+        package_dump = client.shell("dumpsys", "package", package) if package else ""
+        write_evidence(output_dir, filename, "package=" + (package or "not installed") + "\n" +
+                       "\n".join(line for line in package_dump.splitlines() if re.search(r"\bversion(?:Code|Name)=", line)))
+    codec_evidence = diagnostic_lines(read_codec_evidence(client))
+    write_evidence(output_dir, "baseline-metrics.txt", codec_evidence)
+    write_evidence(output_dir, "baseline-codec-log.txt", codec_evidence)
     for name, command in (
-        ("metrics", ("dumpsys", "media.metrics")),
         ("processes", ("dumpsys", "activity", "processes")),
         ("cpu", ("top", "-b", "-n", "1")),
         ("thermal", ("dumpsys", "thermalservice")),
     ):
         write_evidence(output_dir, f"baseline-{name}.txt", diagnostic_lines(client.shell(*command)))
-    write_evidence(output_dir, "baseline-codec-log.txt", diagnostic_lines(read_codec_evidence(client)))
     return state
 
 
@@ -674,9 +749,19 @@ def restore_probe_state(client: AdbClient, state: ProbeState) -> None:
 
 
 def read_codec_evidence(client):
-    metrics = client.shell("dumpsys", "media.metrics", timeout_seconds=1)
-    logs = client.shell("logcat", "-d", "-v", "monotonic", "-s", "MediaMetrics:I", "MediaCodec:I", "CCodec:I", "AndroidRuntime:E", "ActivityManager:I", "*:S", timeout_seconds=1)
-    return metrics + "\n" + logs
+    if client.serial != AUTHORIZED_SERIAL:
+        raise ProbeError("diagnostic target is not the authorized Raspberry Pi")
+    evidence = []
+    for source, command in (
+        ("media.metrics", ("dumpsys", "media.metrics")),
+        ("logcat", ("logcat", "-d", "-v", "monotonic", "-s", "MediaMetrics:I", "MediaCodec:I", "CCodec:I", "AndroidRuntime:E", "ActivityManager:I", "*:S")),
+    ):
+        try:
+            evidence.append(client.shell(*command, timeout_seconds=1))
+        except ProbeError:
+            # Never persist exception messages, commands or partial payloads.
+            evidence.append("diagnostic_unavailable source=" + source)
+    return "\n".join(evidence)
 
 
 def safe_play_tap(client, ui):
@@ -757,6 +842,8 @@ def run_playback_observation(client, output_dir, duration_seconds, *, read_only=
                 if event.event == "start" and qualifies:
                     watched_session = key
                     last_progress_at = now
+                elif event.observed_sample and watched_session is None and qualifies:
+                    watched_session = key
                 if progress.add(event) and key == watched_session and qualifies:
                     last_progress_at = now
         evidence.append(diagnostic_lines(current))
