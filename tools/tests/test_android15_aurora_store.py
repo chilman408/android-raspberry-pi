@@ -426,6 +426,7 @@ class MaterializerTests(unittest.TestCase):
         destination = aosp_root / "vendor" / "devices-community" / "gd_rpi4" / "compatibility-store"
         destination.mkdir(parents=True)
         tool_root = aosp_root / "prebuilts" / "sdk" / "tools" / "linux" / "bin"
+        jdk_bin = aosp_root / "prebuilts" / "jdk" / "jdk17" / "linux-x86" / "bin"
         fake_bin = directory / "fake-bin"
         fake_bin.mkdir()
 
@@ -444,6 +445,12 @@ class MaterializerTests(unittest.TestCase):
             apksigner_name = "apksigner.cmd"
             apksigner_contents = """
                 @echo off
+                if "%REQUIRE_AOSP_JAVA%"=="1" (
+                    if exist "%JAVA_LOG%" del /q "%JAVA_LOG%"
+                    call java --aurora-jdk-probe
+                    if errorlevel 1 exit /b 94
+                    findstr /x "aosp-jdk17" "%JAVA_LOG%" >nul || exit /b 94
+                )
                 echo apksigner %~4>>"%INSPECTION_LOG%"
                 if "%REQUIRE_FINAL_ABSENT%"=="1" if exist "%EXPECTED_FINAL_APK%" exit /b 92
                 if "%REJECT_FINAL_APK%"=="1" if "%~4"=="%EXPECTED_FINAL_APK%" exit /b 91
@@ -468,6 +475,11 @@ class MaterializerTests(unittest.TestCase):
             apksigner_name = "apksigner"
             apksigner_contents = """
                 #!/bin/sh
+                if [ "${REQUIRE_AOSP_JAVA:-0}" = 1 ]; then
+                    rm -f -- "$JAVA_LOG"
+                    java --aurora-jdk-probe || exit 94
+                    grep -qx 'aosp-jdk17' "$JAVA_LOG" || exit 94
+                fi
                 printf 'apksigner %s\n' "$4" >> "$INSPECTION_LOG"
                 if [ "${REQUIRE_FINAL_ABSENT:-0}" = 1 ] && [ -e "$EXPECTED_FINAL_APK" ]; then
                     exit 92
@@ -516,6 +528,21 @@ class MaterializerTests(unittest.TestCase):
             tool_root / aapt2_name,
             aapt2_contents,
         )
+        self.write_executable(
+            jdk_bin / "java",
+            """
+            #!/bin/sh
+            printf 'aosp-jdk17\n' > "$JAVA_LOG"
+            """,
+        )
+        if os.name == "nt":
+            self.write_executable(
+                jdk_bin / "java.cmd",
+                """
+                @echo off
+                echo aosp-jdk17>"%JAVA_LOG%"
+                """,
+            )
 
         environment = os.environ.copy()
         environment["PATH"] = str(fake_bin) + os.pathsep + environment["PATH"]
@@ -587,6 +614,20 @@ class MaterializerTests(unittest.TestCase):
             self.assertEqual(len(accepted_calls), 2)
             self.assertTrue(accepted_calls[0].startswith("apksigner "))
             self.assertTrue(accepted_calls[1].startswith("aapt2 "))
+
+    def test_materializer_supplies_synced_aosp_jdk_to_apksigner(self):
+        """Verification must not depend on Java being installed on the build host."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(directory)
+            environment["REQUIRE_AOSP_JAVA"] = "1"
+            environment["JAVA_LOG"] = str(directory / "java.log")
+
+            result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((directory / "java.log").read_text(encoding="utf-8").strip(), "aosp-jdk17")
 
     def test_materializer_removes_temporary_file_when_download_fails(self):
         """A failed transfer must not leave reusable partial download state."""

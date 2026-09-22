@@ -42,6 +42,9 @@ done
 lock="$(realpath -- "$lock")"
 destination="$(realpath -- "$destination")"
 aosp_root="$(realpath -- "$aosp_root")"
+aosp_java_bin="$aosp_root/prebuilts/jdk/jdk17/linux-x86/bin"
+
+[[ -x "$aosp_java_bin/java" ]] || die "AOSP JDK 17 java is not executable: $aosp_java_bin/java"
 
 case "$destination" in
     "$aosp_root"|"$aosp_root"/*) ;;
@@ -60,7 +63,7 @@ if [[ -e "$final_apk" && ! -f "$final_apk" ]]; then
 fi
 
 if [[ -f "$final_apk" ]]; then
-    if python3 "$repository_root/tools/check-aurora-store.py" \
+    if PATH="$aosp_java_bin:$PATH" python3 "$repository_root/tools/check-aurora-store.py" \
         --lock "$lock" \
         --apk "$final_apk" \
         --apksigner "$aosp_root/prebuilts/sdk/tools/linux/bin/apksigner" \
@@ -74,7 +77,7 @@ cleanup() { [[ -z "${temporary_apk:-}" ]] || rm -f -- "$temporary_apk"; }
 trap cleanup EXIT INT TERM
 curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
   --output "$temporary_apk" "$url"
-python3 "$repository_root/tools/check-aurora-store.py" \
+PATH="$aosp_java_bin:$PATH" python3 "$repository_root/tools/check-aurora-store.py" \
   --lock "$lock" \
   --apk "$temporary_apk" \
   --logical-filename "$filename" \
