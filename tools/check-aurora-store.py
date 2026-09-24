@@ -122,8 +122,24 @@ def _normalise_digest(value: str) -> str:
     return re.sub(r"[:\s]", "", value)
 
 
-def _verify_signature(lock: AuroraLock, apk: pathlib.Path, apksigner: pathlib.Path, runner) -> None:
-    output = _run_tool(runner, [str(apksigner), "verify", "--verbose", "--print-certs", str(apk)], "apksigner")
+def _verify_signature(
+    lock: AuroraLock,
+    apk: pathlib.Path,
+    apksigner: pathlib.Path,
+    runner,
+    java: pathlib.Path | None = None,
+    apksigner_jar: pathlib.Path | None = None,
+) -> None:
+    if (java is None) != (apksigner_jar is None):
+        raise VerificationError("java and apksigner jar must be provided together")
+    command = [str(apksigner)]
+    if java is not None and apksigner_jar is not None:
+        command = [str(java), "-jar", str(apksigner_jar)]
+    output = _run_tool(
+        runner,
+        [*command, "verify", "--verbose", "--print-certs", str(apk)],
+        "apksigner",
+    )
     if not re.search(r"^Verified using .+?:\s*true\s*$", output, re.MULTILINE):
         raise VerificationError("apksigner did not report a verified signature scheme")
     signer_lines = re.findall(r"^Signer #\d+ certificate SHA-256 digest:\s*(.+?)\s*$", output, re.MULTILINE)
@@ -152,6 +168,8 @@ def verify_apk(
     aapt2: pathlib.Path,
     runner=subprocess.run,
     logical_filename: str | None = None,
+    java: pathlib.Path | None = None,
+    apksigner_jar: pathlib.Path | None = None,
 ) -> None:
     """Raise VerificationError unless APK, tools, and metadata satisfy ``lock``."""
     try:
@@ -171,7 +189,7 @@ def verify_apk(
         raise VerificationError("APK could not be read") from error
     if digest != lock.sha256:
         raise VerificationError("APK SHA-256 does not match the lock")
-    _verify_signature(lock, apk, apksigner, runner)
+    _verify_signature(lock, apk, apksigner, runner, java, apksigner_jar)
     _verify_badging(lock, apk, aapt2, runner)
 
 
@@ -180,12 +198,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock", type=pathlib.Path, required=True)
     parser.add_argument("--apk", type=pathlib.Path, required=True)
     parser.add_argument("--apksigner", type=pathlib.Path, required=True)
+    parser.add_argument("--java", type=pathlib.Path)
+    parser.add_argument("--apksigner-jar", type=pathlib.Path)
     parser.add_argument("--aapt2", type=pathlib.Path, required=True)
     parser.add_argument("--logical-filename")
     args = parser.parse_args(argv)
     try:
         lock = AuroraLock.from_path(args.lock)
-        verify_apk(lock, args.apk, args.apksigner, args.aapt2, logical_filename=args.logical_filename)
+        verify_apk(
+            lock,
+            args.apk,
+            args.apksigner,
+            args.aapt2,
+            logical_filename=args.logical_filename,
+            java=args.java,
+            apksigner_jar=args.apksigner_jar,
+        )
     except (LockError, VerificationError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

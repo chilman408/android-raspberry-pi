@@ -368,6 +368,34 @@ class Android15AuroraStoreTest(unittest.TestCase):
                 self.successful_runner(apk),
             )
 
+    def test_verify_can_invoke_explicit_aosp_apksigner_jar(self):
+        """AOSP's broken SDK launcher must not prevent direct jar verification."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            lock, apk = self.fixture_lock_and_apk(pathlib.Path(temp_dir))
+            java = pathlib.Path("aosp-java")
+            apksigner_jar = pathlib.Path("aosp-apksigner.jar")
+            signature_command = [
+                str(java), "-jar", str(apksigner_jar),
+                "verify", "--verbose", "--print-certs", str(apk),
+            ]
+
+            def runner(args, **kwargs):
+                if args == signature_command:
+                    return self.successful_runner(apk)(
+                        ["apksigner", *args[3:]], **kwargs
+                    )
+                return self.successful_runner(apk)(args, **kwargs)
+
+            aurora_store.verify_apk(
+                lock,
+                apk,
+                pathlib.Path("broken-aosp-launcher"),
+                pathlib.Path("aapt2"),
+                runner,
+                java=java,
+                apksigner_jar=apksigner_jar,
+            )
+
 
 class MaterializerTests(unittest.TestCase):
     """Behavior tests for downloading and installing the pinned APK safely."""
@@ -426,6 +454,7 @@ class MaterializerTests(unittest.TestCase):
         destination = aosp_root / "vendor" / "devices-community" / "gd_rpi4" / "compatibility-store"
         destination.mkdir(parents=True)
         tool_root = aosp_root / "prebuilts" / "sdk" / "tools" / "linux" / "bin"
+        apksigner_jar = aosp_root / "prebuilts" / "sdk" / "tools" / "linux" / "lib" / "apksigner.jar"
         jdk_bin = aosp_root / "prebuilts" / "jdk" / "jdk17" / "linux-x86" / "bin"
         fake_bin = directory / "fake-bin"
         fake_bin.mkdir()
@@ -436,7 +465,7 @@ class MaterializerTests(unittest.TestCase):
                 arguments=()
                 for argument in "$@"; do
                     case "$argument" in
-                        */apksigner|*/aapt2) argument="${{argument}}.cmd" ;;
+                        */apksigner|*/aapt2|*/java) argument="${{argument}}.cmd" ;;
                     esac
                     arguments+=("$argument")
                 done
@@ -451,6 +480,7 @@ class MaterializerTests(unittest.TestCase):
                     if errorlevel 1 exit /b 94
                     findstr /x "aosp-jdk17" "%JAVA_LOG%" >nul || exit /b 94
                 )
+                if "%FAKE_APKSIGNER_LAUNCHER_FAIL%"=="1" exit /b 95
                 echo apksigner %~4>>"%INSPECTION_LOG%"
                 if "%REQUIRE_FINAL_ABSENT%"=="1" if exist "%EXPECTED_FINAL_APK%" exit /b 92
                 if "%REJECT_FINAL_APK%"=="1" if "%~4"=="%EXPECTED_FINAL_APK%" exit /b 91
@@ -480,6 +510,7 @@ class MaterializerTests(unittest.TestCase):
                     java --aurora-jdk-probe || exit 94
                     grep -qx 'aosp-jdk17' "$JAVA_LOG" || exit 94
                 fi
+                [ "${FAKE_APKSIGNER_LAUNCHER_FAIL:-0}" != 1 ] || exit 95
                 printf 'apksigner %s\n' "$4" >> "$INSPECTION_LOG"
                 if [ "${REQUIRE_FINAL_ABSENT:-0}" = 1 ] && [ -e "$EXPECTED_FINAL_APK" ]; then
                     exit 92
@@ -528,11 +559,30 @@ class MaterializerTests(unittest.TestCase):
             tool_root / aapt2_name,
             aapt2_contents,
         )
+        apksigner_jar.parent.mkdir(parents=True, exist_ok=True)
+        apksigner_jar.write_bytes(b"fixture apksigner jar\n")
         self.write_executable(
             jdk_bin / "java",
             """
             #!/bin/sh
-            printf 'aosp-jdk17\n' > "$JAVA_LOG"
+            if [ -n "${JAVA_LOG:-}" ]; then
+                printf 'aosp-jdk17\n' > "$JAVA_LOG"
+            fi
+            if [ "${1:-}" = -jar ]; then
+                [ "$2" = "$EXPECTED_APKSIGNER_JAR" ] || exit 96
+                printf 'apksigner %s\n' "$6" >> "$INSPECTION_LOG"
+                if [ "${REQUIRE_FINAL_ABSENT:-0}" = 1 ] && [ -e "$EXPECTED_FINAL_APK" ]; then
+                    exit 92
+                fi
+                if [ "${REJECT_FINAL_APK:-0}" = 1 ] && [ "$6" = "$EXPECTED_FINAL_APK" ]; then
+                    exit 91
+                fi
+                [ "${FAKE_APKSIGNER_FAIL:-0}" != 1 ] || exit 93
+                printf '%s\n' \
+                  'Verified using v1 scheme (JAR signing): true' \
+                  'Verified using v2 scheme (APK Signature Scheme v2): true' \
+                  'Signer #1 certificate SHA-256 digest: 4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f'
+            fi
             """,
         )
         if os.name == "nt":
@@ -540,7 +590,17 @@ class MaterializerTests(unittest.TestCase):
                 jdk_bin / "java.cmd",
                 """
                 @echo off
-                echo aosp-jdk17>"%JAVA_LOG%"
+                if not "%JAVA_LOG%"=="" echo aosp-jdk17>"%JAVA_LOG%"
+                if "%~1"=="-jar" (
+                    for %%J in ("%EXPECTED_APKSIGNER_JAR%") do if /i not "%~f2"=="%%~fJ" exit /b 96
+                    echo apksigner %~6>>"%INSPECTION_LOG%"
+                    if "%REQUIRE_FINAL_ABSENT%"=="1" if exist "%EXPECTED_FINAL_APK%" exit /b 92
+                    if "%REJECT_FINAL_APK%"=="1" if "%~6"=="%EXPECTED_FINAL_APK%" exit /b 91
+                    if "%FAKE_APKSIGNER_FAIL%"=="1" exit /b 93
+                    echo Verified using v1 scheme ^(JAR signing^): true
+                    echo Verified using v2 scheme ^(APK Signature Scheme v2^): true
+                    echo Signer #1 certificate SHA-256 digest: 4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f
+                )
                 """,
             )
 
@@ -549,6 +609,9 @@ class MaterializerTests(unittest.TestCase):
         environment["FAKE_BIN_BASH"] = self.bash_path(fake_bin)
         environment["FAKE_APK_SOURCE"] = self.bash_path(fixture)
         environment["EXPECTED_FINAL_APK"] = str(destination / EXPECTED_LOCK["filename"])
+        environment["EXPECTED_APKSIGNER_JAR"] = (
+            str(apksigner_jar.resolve()) if os.name == "nt" else self.bash_path(apksigner_jar)
+        )
         environment["INSPECTION_LOG"] = str(directory / "inspection.log")
         return destination, aosp_root, environment
 
@@ -628,6 +691,19 @@ class MaterializerTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((directory / "java.log").read_text(encoding="utf-8").strip(), "aosp-jdk17")
+
+    def test_materializer_bypasses_broken_aosp_apksigner_launcher(self):
+        """The verifier must invoke the working AOSP jar instead of its broken launcher."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            lock = self.write_lock(directory, self.fixture_apk_bytes)
+            destination, aosp_root, environment = self.make_fixture_environment(directory)
+            environment["FAKE_APKSIGNER_LAUNCHER_FAIL"] = "1"
+
+            result = self.run_materializer(lock, destination, aosp_root, environment)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((destination / EXPECTED_LOCK["filename"]).is_file())
 
     def test_materializer_removes_temporary_file_when_download_fails(self):
         """A failed transfer must not leave reusable partial download state."""
