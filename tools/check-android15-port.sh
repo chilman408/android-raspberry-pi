@@ -56,7 +56,15 @@ require_match "manifests/glodroid.xml" 'revision="45f05f681224d88d1b170063001b59
 require_match "manifests/tesla-android.xml" 'revision="c82b898997a47b699869e9650920eacecc4fd14d"' \
   "Android 15 requires the init_boot-capable GloDroid configuration"
 require_match "manifests/tesla-android.xml" 'path="vendor/tesla-android".*revision="6e139bf41585188308e053dcbb34855f644aedba"' \
-  "The image must ship the official TeslaAndroid 2026.22.1 vendor payload"
+  "The image must use the pinned Tesla Android vendor baseline"
+require_file "patches-aosp/vendor/tesla-android/0002-release-Brand-Android-15-work-week-39.patch" \
+  "The image must carry the Android 15 work-week release presentation patch"
+require_match "patches-aosp/vendor/tesla-android/0002-release-Brand-Android-15-work-week-39.patch" \
+  '2026\.39\.a15\.1' \
+  "The Android 15 public release version must use the approved platform-qualified format"
+require_match "patches-aosp/vendor/tesla-android/0002-release-Brand-Android-15-work-week-39.patch" \
+  'https://github\.com/chilman408/TeslaAndroid-R15-Rpi4' \
+  "The About page must point to the Android 15 Raspberry Pi 4 fork"
 require_file "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
   "Expanded userdata must not starve Android with background inode-table writes"
 require_match "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
@@ -106,6 +114,9 @@ if ! python3 -m unittest -v tools/tests/test_android15_runtime_performance.py; t
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_android15_disney_plus_decoder.py; then
+  failures=$((failures + 1))
+fi
+if ! python3 -m unittest -v tools/tests/test_android15_release_presentation.py; then
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_apple_tv_codec_probe.py; then

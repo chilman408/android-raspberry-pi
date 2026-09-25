@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+
+import html
+import pathlib
+import re
+import unittest
+import xml.etree.ElementTree as ET
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+RELEASE_PATCH = (
+    REPO_ROOT
+    / "patches-aosp"
+    / "vendor"
+    / "tesla-android"
+    / "0002-release-Brand-Android-15-work-week-39.patch"
+)
+MANIFEST = REPO_ROOT / "manifests" / "tesla-android.xml"
+PORT_GATE = REPO_ROOT / "tools" / "check-android15-port.sh"
+
+VENDOR_REVISION = "6e139bf41585188308e053dcbb34855f644aedba"
+RELEASE_VERSION = "2026.39.a15.1"
+PROJECT_URL = "https://github.com/chilman408/TeslaAndroid-R15-Rpi4"
+DONATION_COPY = (
+    "This is a self funded project, your contribution means the world to me!"
+)
+DONATION_URL = (
+    "https://www.paypal.com/donate/?business=TFWNLUC7ZGSPS&no_recurring=0"
+    "&item_name=Thank+you+for+your+support%21++I+appreciate+it."
+    "&currency_code=USD"
+)
+OLD_ABOUT = "Tesla Android (2nd generation) hardware is now available."
+OLD_DONATION_COPY = (
+    "Thank you for considering a donation to support the ongoing development "
+    "of Tesla Android. As a community-founded project, your contribution can "
+    "truly make a difference!"
+)
+
+
+class Android15ReleasePresentationTest(unittest.TestCase):
+    def release_patch(self):
+        self.assertTrue(
+            RELEASE_PATCH.is_file(),
+            f"missing Android 15 release presentation patch: {RELEASE_PATCH}",
+        )
+        return RELEASE_PATCH.read_text(encoding="utf-8")
+
+    def test_manifest_pins_release_patch_vendor_revision(self):
+        projects = {
+            project.get("path"): project.get("revision")
+            for project in ET.parse(MANIFEST).getroot().findall("project")
+        }
+        self.assertEqual(projects.get("vendor/tesla-android"), VENDOR_REVISION)
+
+    def test_release_patch_covers_both_frontends(self):
+        patch = self.release_patch()
+        for value in (
+            RELEASE_VERSION,
+            PROJECT_URL,
+            DONATION_COPY,
+            DONATION_URL,
+            "Android 15 Release",
+            "Streaming Compatibility",
+            "Apple TV protected playback remains unvalidated",
+        ):
+            with self.subTest(value=value):
+                self.assertIn(value, patch)
+
+        changed_paths = set(
+            re.findall(r"(?m)^diff --git a/(\S+) b/\S+$", patch)
+        )
+        self.assertTrue(
+            {
+                "vendor.mk",
+                "services/lighttpd/www-default/version.json",
+                "services/lighttpd/www-default/main.dart.js",
+                "services/lighttpd/www-default/flutter_service_worker.js",
+                "services/lighttpd/www-default/beta/index.html",
+                "services/lighttpd/www-default/beta/js/core/shared.js",
+                "services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js",
+                "services/lighttpd/www-default/beta/assets/donations-qr.svg",
+            }.issubset(changed_paths)
+        )
+
+    def test_public_version_changes_without_forcing_boot_partition_rewrite(self):
+        patch = self.release_patch()
+        self.assertGreaterEqual(
+            len(re.findall(rf"^\+.*{re.escape(RELEASE_VERSION)}", patch, re.MULTILINE)),
+            4,
+            "product property, version JSON, beta About, and release notes must agree",
+        )
+        self.assertNotIn("services/updateBootFiles/updateBootFiles.sh", patch)
+
+    def test_current_about_and_donation_copy_are_replaced(self):
+        patch = self.release_patch()
+        self.assertRegex(patch, rf"(?m)^-.*{re.escape(OLD_ABOUT)}")
+        self.assertRegex(patch, rf"(?m)^-.*{re.escape(OLD_DONATION_COPY)}")
+        self.assertRegex(patch, rf"(?m)^\+.*{re.escape(PROJECT_URL)}")
+        self.assertRegex(patch, rf"(?m)^\+.*{re.escape(DONATION_COPY)}")
+
+    def test_beta_qr_and_production_generator_share_exact_payload(self):
+        patch = self.release_patch()
+        escaped_url = html.escape(DONATION_URL, quote=True)
+        self.assertIn(f"<desc>{escaped_url}</desc>", patch)
+        self.assertRegex(
+            patch,
+            rf'(?m)^\+.*new A\.yN\("{re.escape(DONATION_URL)}",-1,s\)',
+        )
+        self.assertRegex(
+            patch,
+            r"(?m)^\+.*<path\b[^>]*\bd=",
+            "beta donation SVG must contain a generated QR path",
+        )
+
+    def test_port_gate_requires_release_contract(self):
+        gate = PORT_GATE.read_text(encoding="utf-8")
+        self.assertIn(RELEASE_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
+        self.assertIn("test_android15_release_presentation.py", gate)
+
+
+if __name__ == "__main__":
+    unittest.main()
