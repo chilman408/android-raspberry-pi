@@ -20,7 +20,7 @@ def getBuildNumber() {
 }
 
 def getVersion(file) {
-    def version = file =~ /ro\.tesla-android\.build\.version\s*=\s*([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)/;
+    def version = file =~ /ro\.tesla-android\.build\.version\s*=\s*([0-9]+\.[0-9]+(?:\.a[0-9]+)?\.[0-9]+)/;
     def fullVersion = version[0][0];
     def versionNumber = fullVersion.split('=')[1].trim()
     return versionNumber;

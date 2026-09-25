@@ -17,6 +17,7 @@ RELEASE_PATCH = (
 )
 MANIFEST = REPO_ROOT / "manifests" / "tesla-android.xml"
 PORT_GATE = REPO_ROOT / "tools" / "check-android15-port.sh"
+JENKINS_PIPELINE = REPO_ROOT / "jenkins" / "multi-branch-ci.groovy"
 
 VENDOR_REVISION = "6e139bf41585188308e053dcbb34855f644aedba"
 RELEASE_VERSION = "2026.39.a15.1"
@@ -116,6 +117,21 @@ class Android15ReleasePresentationTest(unittest.TestCase):
         gate = PORT_GATE.read_text(encoding="utf-8")
         self.assertIn(RELEASE_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
         self.assertIn("test_android15_release_presentation.py", gate)
+
+    def test_release_version_pattern_accepts_android_platform_segment(self):
+        pipeline = JENKINS_PIPELINE.read_text(encoding="utf-8")
+        declaration = re.search(r"def version = file =~ /(.+?)/;", pipeline)
+        self.assertIsNotNone(declaration, "missing Jenkins release-version pattern")
+        version_pattern = re.compile(declaration.group(1))
+
+        def parse(value):
+            match = version_pattern.search(
+                f"ro.tesla-android.build.version={value}"
+            )
+            return match.group(1) if match else None
+
+        self.assertEqual(parse("2026.39.a15.1"), "2026.39.a15.1")
+        self.assertEqual(parse("2026.22.1"), "2026.22.1")
 
 
 if __name__ == "__main__":
