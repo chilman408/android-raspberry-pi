@@ -92,6 +92,22 @@ class Android15ReleasePresentationTest(unittest.TestCase):
         )
         self.assertNotIn("services/updateBootFiles/updateBootFiles.sh", patch)
 
+    def test_service_worker_uses_canonical_patched_blob_hashes(self):
+        patch = self.release_patch()
+        expected_hashes = {
+            "main.dart.js": "9453a655bc483696871f8a79bf3c460b",
+            "version.json": "ffbf02a1282eba29fc659aa4bfe8e635",
+            "beta/index.html": "52e8d76061b987fc8c9bcea7aed92389",
+            "beta/js/core/shared.js": "acf1abfb8169d3e5f12078f5ff1f9532",
+            "beta/js/release-notes/release-notes-data.js": (
+                "38b0b384cfb818f7958078f0ce074f1c"
+            ),
+            "beta/assets/donations-qr.svg": "3450073a38e6d616d6ce6cdcaf9d0c22",
+        }
+        for asset, digest in expected_hashes.items():
+            with self.subTest(asset=asset):
+                self.assertIn(f'"{asset}": "{digest}"', patch)
+
     def test_current_about_and_donation_copy_are_replaced(self):
         patch = self.release_patch()
         self.assertRegex(patch, rf"(?m)^-.*{re.escape(OLD_ABOUT)}")

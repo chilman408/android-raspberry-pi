@@ -1,4 +1,4 @@
-From a7d723ff07eb7d6bdd6eaef9a3027d80ad08e541 Mon Sep 17 00:00:00 2001
+From 4d8967973deef264eb823b8f851bccb00922cf38 Mon Sep 17 00:00:00 2001
 From: Tesla Android CI <ci@teslaandroid.local>
 Date: Fri, 25 Sep 2026 02:32:40 -0700
 Subject: [PATCH] release: brand Android 15 work-week 39
@@ -663,7 +663,7 @@ index 42c3444..e2a9bde 100644
        ]
      },
 diff --git a/services/lighttpd/www-default/flutter_service_worker.js b/services/lighttpd/www-default/flutter_service_worker.js
-index b1f17ef..5d801f5 100644
+index b1f17ef..18007d8 100644
 --- a/services/lighttpd/www-default/flutter_service_worker.js
 +++ b/services/lighttpd/www-default/flutter_service_worker.js
 @@ -3,20 +3,20 @@ const MANIFEST = 'flutter-app-manifest';
@@ -671,7 +671,7 @@ index b1f17ef..5d801f5 100644
  const CACHE_NAME = 'flutter-app-cache';
  
 -const RESOURCES = {"beta/index.html": "e9083db8bf7654729db47da4b06e4901",
-+const RESOURCES = {"beta/index.html": "aa15062c083856c981a8cd657d663fce",
++const RESOURCES = {"beta/index.html": "52e8d76061b987fc8c9bcea7aed92389",
  "beta/LICENSE": "1ebbd3e34237af26da5dc08a4e440464",
  "beta/css/app.css": "64d3bee5a5ad940221389161cfb72757",
  "beta/js/settings/settings-controller.js": "25dfba6d308dd454d8615eb6da834836",
@@ -679,14 +679,14 @@ index b1f17ef..5d801f5 100644
  "beta/js/touchscreen/touchscreen-controller.js": "a9a1f2aeef98e5e28658f9731fee2bb1",
  "beta/js/core/api-client.js": "7017b8ad03556bbe3efb74160a98cd8d",
 -"beta/js/core/shared.js": "5721d5a45c0b50b334622f4d33b86e38",
-+"beta/js/core/shared.js": "fc3e488623ac89133adbb5d1195f7a74",
++"beta/js/core/shared.js": "acf1abfb8169d3e5f12078f5ff1f9532",
  "beta/js/core/app.js": "c45ca34879e885cc6aea1af91571853f",
  "beta/js/gps/estimator.js": "2e8d77774febade25070f24689662912",
  "beta/js/gps/gps-controller.js": "06941196f50c244de074b446829ea28d",
  "beta/js/shell/shell-controller.js": "9db6493187e28ad2ede9b4856d7ffe6f",
  "beta/js/release-notes/release-notes-controller.js": "35c7981aad6dbf494fdc803f3d78ae0d",
 -"beta/js/release-notes/release-notes-data.js": "931eb2410c8b2a5bb8cc1c87052b4375",
-+"beta/js/release-notes/release-notes-data.js": "33574264693fb8a1fc5065a5728c1cad",
++"beta/js/release-notes/release-notes-data.js": "38b0b384cfb818f7958078f0ce074f1c",
  "beta/js/audio/audio-ws-worker.js": "75e004b85ee8b049fe7965c07dc9cf44",
  "beta/js/audio/audioplayback.js": "3d8ccd0007411c38fbd66619c4f052cf",
  "beta/js/audio/audio-controller.js": "17777820a289e941b25c965733d914c2",
@@ -704,7 +704,7 @@ index b1f17ef..5d801f5 100644
  "index.html": "2a3ce84693bbc0358163ea001c3154c3",
  "/": "2a3ce84693bbc0358163ea001c3154c3",
 -"main.dart.js": "ba4bb5289600a1b1f8de22a3bd63012b",
-+"main.dart.js": "f205af6321596e25b4aa0afcca0372cd",
++"main.dart.js": "9453a655bc483696871f8a79bf3c460b",
  "reconnecting-websocket.js": "4ef9dd81c9e8157a1702623078c7ece1",
  "Decoder.js": "7754075ec40cf97622ccd750cb9031de",
  "flutter.js": "4b2350e14c6650ba82871f60906437ea",
