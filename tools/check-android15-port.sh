@@ -68,6 +68,11 @@ require_match "patches-aosp/glodroid/configuration/0027-userdata-Avoid-backgroun
 require_match "patches-aosp/frameworks/av/0001-Audioflinger-add-audio-capture-via-tesla-android-aud.patch" \
   'MSG_NOSIGNAL \| MSG_DONTWAIT' \
   "Browser audio relay writes must not block the real-time AudioFlinger thread"
+require_file "patches-aosp/external/v4l2_codec2/0013-RPI4-v4l2_codec2-decoder-Preserve-supported-capture.patch" \
+  "Disney+ adaptive playback requires the Raspberry Pi V4L2 source-change fix"
+require_match "patches-aosp/external/v4l2_codec2/0013-RPI4-v4l2_codec2-decoder-Preserve-supported-capture.patch" \
+  'if \(!outputFormatSupported && !setupOutputFormat\(codedSize\)\)' \
+  "Supported driver-selected CAPTURE formats must bypass redundant S_FMT"
 require_file "patches-aosp/glodroid/configuration/0011-bootscript-Account-for-ab_select-command-u-boot-chan.patch" \
   "The boot script must use the current U-Boot A/B selection command"
 require_file "patches-aosp/glodroid/bootloader/u-boot/0002-abootcmd-Add-load-subcommand.patch" \
@@ -98,6 +103,9 @@ if ! python3 -m unittest -v tools/tests/test_android15_connectivity_fakewifi_pat
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_android15_runtime_performance.py; then
+  failures=$((failures + 1))
+fi
+if ! python3 -m unittest -v tools/tests/test_android15_disney_plus_decoder.py; then
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_apple_tv_codec_probe.py; then

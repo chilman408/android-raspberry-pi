@@ -1,0 +1,37 @@
+From 0dc10dedf5340c970b3e918af4c56c13d8c5e83c Mon Sep 17 00:00:00 2001
+From: Tesla Android CI <ci@teslaandroid.local>
+Date: Fri, 25 Sep 2026 02:23:07 -0700
+Subject: [PATCH] RPI4: v4l2_codec2: preserve supported capture format
+
+After a V4L2 source-change event the Raspberry Pi decoder already exposes
+the new NV12 CAPTURE format through G_FMT. Calling S_FMT again while the
+CAPTURE queue is still allocated and streaming fails and aborts adaptive
+playback.
+
+Keep the driver-selected format when it is supported. Retain the existing
+format-selection fallback when the driver reports anything else, and leave
+the queue teardown and reallocation order unchanged.
+
+Signed-off-by: Tesla Android CI <ci@teslaandroid.local>
+---
+ components/V4L2Decoder.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/components/V4L2Decoder.cpp b/components/V4L2Decoder.cpp
+index aa59e91..c38b8ac 100644
+--- a/components/V4L2Decoder.cpp
++++ b/components/V4L2Decoder.cpp
+@@ -506,7 +506,11 @@ bool V4L2Decoder::changeResolution() {
+     *numOutputBuffers = std::max(*numOutputBuffers, mMinNumOutputBuffers);
+ 
+     const ui::Size codedSize(format->fmt.pix_mp.width, format->fmt.pix_mp.height);
+-    if (!setupOutputFormat(codedSize)) {
++    const uint32_t pixfmt = format->fmt.pix_mp.pixelformat;
++    const bool outputFormatSupported =
++            std::find(kSupportedOutputFourccs.begin(), kSupportedOutputFourccs.end(), pixfmt) !=
++            kSupportedOutputFourccs.end();
++    if (!outputFormatSupported && !setupOutputFormat(codedSize)) {
+         return false;
+     }
+ 
+
