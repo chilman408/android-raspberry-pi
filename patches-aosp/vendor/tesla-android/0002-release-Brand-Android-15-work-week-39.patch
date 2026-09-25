@@ -1,4 +1,4 @@
-From 4d8967973deef264eb823b8f851bccb00922cf38 Mon Sep 17 00:00:00 2001
+From 330cdff141535dffe7a421fa43897c38b3a6d15e Mon Sep 17 00:00:00 2001
 From: Tesla Android CI <ci@teslaandroid.local>
 Date: Fri, 25 Sep 2026 02:32:40 -0700
 Subject: [PATCH] release: brand Android 15 work-week 39
@@ -10,12 +10,12 @@ Signed-off-by: Tesla Android CI <ci@teslaandroid.local>
  .../www-default/beta/assets/donations-qr.svg  | 558 +-----------------
  services/lighttpd/www-default/beta/index.html |  21 +-
  .../www-default/beta/js/core/shared.js        |   2 +-
- .../js/release-notes/release-notes-data.js    |  14 +-
+ .../js/release-notes/release-notes-data.js    |  15 +
  .../www-default/flutter_service_worker.js     |  12 +-
  services/lighttpd/www-default/main.dart.js    |  12 +-
  services/lighttpd/www-default/version.json    |   2 +-
  vendor.mk                                     |   2 +-
- 8 files changed, 36 insertions(+), 587 deletions(-)
+ 8 files changed, 46 insertions(+), 578 deletions(-)
 
 diff --git a/services/lighttpd/www-default/beta/assets/donations-qr.svg b/services/lighttpd/www-default/beta/assets/donations-qr.svg
 index b594969..d3270b6 100644
@@ -634,36 +634,33 @@ index cc7d6cd..01638be 100644
        "DisplayRepository_isPrimaryDisplaySharedPreferencesKey",
        "flutter.DisplayRepository_isPrimaryDisplaySharedPreferencesKey",
 diff --git a/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js b/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js
-index 42c3444..e2a9bde 100644
+index 42c3444..582b46e 100644
 --- a/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js
 +++ b/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js
-@@ -6,17 +6,17 @@
+@@ -6,6 +6,21 @@
    TAHtml.releaseNotesData = {
    "versions": [
  	{
--      "versionName": "2026.22.1",
 +      "versionName": "2026.39.a15.1",
-       "changelogItems": [
-         {
--          "title": "Frontend Beta",
--          "shortDescription": "Performance improvements",
--          "descriptionMarkdown": "You can now access the beta Tesla Android frontend app at https://device.teslaandroid.com/beta. The new app uses much less memory and consumes less resources."
++      "changelogItems": [
++        {
 +          "title": "Android 15 Release",
 +          "shortDescription": "Platform and app compatibility",
 +          "descriptionMarkdown": "Tesla Android now runs on Android 15. This release adds the verified Compatibility Store (Aurora) for apps missing from Google Play and includes major display, browser audio, and virtual touchscreen reliability improvements."
-         },
-         {
--          "title": "Bluetooth Audio",
--          "shortDescription": "Stability improvements",
--          "descriptionMarkdown": "BT Audio shouldn't interfere with Browser Audio anymore, if you intend to pair your car with the device via BT make sure to disable Browser Audio first."
++        },
++        {
 +          "title": "Streaming Compatibility",
 +          "shortDescription": "Netflix and Disney+ playback fixes",
-+          "descriptionMarkdown": "Netflix video playback is restored, and Disney+ adaptive-resolution playback no longer fails when the Raspberry Pi 4 hardware decoder changes stream resolution.\n\nApple TV protected playback remains unvalidated and unsupported on this Widevine L3 device."
-         }
-       ]
-     },
++          "descriptionMarkdown": "Netflix video playback is restored, and Disney+ adaptive-resolution playback no longer fails when the Raspberry Pi 4 hardware decoder changes stream resolution.\n\nApple TV protected playback remains unvalidated and unsupported on this Widevine L3, unprotected-output device."
++        }
++      ]
++    },
++    {
+       "versionName": "2026.22.1",
+       "changelogItems": [
+         {
 diff --git a/services/lighttpd/www-default/flutter_service_worker.js b/services/lighttpd/www-default/flutter_service_worker.js
-index b1f17ef..18007d8 100644
+index b1f17ef..b660c12 100644
 --- a/services/lighttpd/www-default/flutter_service_worker.js
 +++ b/services/lighttpd/www-default/flutter_service_worker.js
 @@ -3,20 +3,20 @@ const MANIFEST = 'flutter-app-manifest';
@@ -686,7 +683,7 @@ index b1f17ef..18007d8 100644
  "beta/js/shell/shell-controller.js": "9db6493187e28ad2ede9b4856d7ffe6f",
  "beta/js/release-notes/release-notes-controller.js": "35c7981aad6dbf494fdc803f3d78ae0d",
 -"beta/js/release-notes/release-notes-data.js": "931eb2410c8b2a5bb8cc1c87052b4375",
-+"beta/js/release-notes/release-notes-data.js": "38b0b384cfb818f7958078f0ce074f1c",
++"beta/js/release-notes/release-notes-data.js": "89ee64bdef9c6b88d675543cb96c214a",
  "beta/js/audio/audio-ws-worker.js": "75e004b85ee8b049fe7965c07dc9cf44",
  "beta/js/audio/audioplayback.js": "3d8ccd0007411c38fbd66619c4f052cf",
  "beta/js/audio/audio-controller.js": "17777820a289e941b25c965733d914c2",
@@ -704,12 +701,12 @@ index b1f17ef..18007d8 100644
  "index.html": "2a3ce84693bbc0358163ea001c3154c3",
  "/": "2a3ce84693bbc0358163ea001c3154c3",
 -"main.dart.js": "ba4bb5289600a1b1f8de22a3bd63012b",
-+"main.dart.js": "9453a655bc483696871f8a79bf3c460b",
++"main.dart.js": "8eb476b14046985de2b57e6a8d56c911",
  "reconnecting-websocket.js": "4ef9dd81c9e8157a1702623078c7ece1",
  "Decoder.js": "7754075ec40cf97622ccd750cb9031de",
  "flutter.js": "4b2350e14c6650ba82871f60906437ea",
 diff --git a/services/lighttpd/www-default/main.dart.js b/services/lighttpd/www-default/main.dart.js
-index 834e74d..364b6ef 100644
+index 834e74d..7fddc3c 100644
 --- a/services/lighttpd/www-default/main.dart.js
 +++ b/services/lighttpd/www-default/main.dart.js
 @@ -79499,7 +79499,7 @@ $S:6}
@@ -721,21 +718,27 @@ index 834e74d..364b6ef 100644
  A.k3.prototype={
  mP(){var s=0,r=A.K(t.H),q,p=2,o,n=this,m,l,k,j,i,h,g,f,e,d,c,b
  var $async$mP=A.G(function(a,a0){if(a===1){o=a0
-@@ -83544,10 +83544,10 @@ B.Bg=new A.JL()
+@@ -83544,6 +83544,10 @@ B.Bg=new A.JL()
  B.Rm=new A.a7I(0,"square")
  B.Bh=new A.JM()
  B.ls=new A.JY()
--B.CN=new A.P("Frontend Beta","Performance improvements","You can now access the beta Tesla Android frontend app at https://device.teslaandroid.com/beta. The new app uses much less memory and consumes less resources.")
--B.CU=new A.P("Bluetooth Audio","Stability improvements","BT Audio shouldn't interfere with Browser Audio anymore, if you intend to pair your car with the device via BT make sure to disable Browser Audio first.")
-+B.CN=new A.P("Android 15 Release","Platform and app compatibility","Tesla Android now runs on Android 15. This release adds the verified Compatibility Store (Aurora) for apps missing from Google Play and includes major display, browser audio, and virtual touchscreen reliability improvements.")
-+B.CU=new A.P("Streaming Compatibility","Netflix and Disney+ playback fixes","Netflix video playback is restored, and Disney+ adaptive-resolution playback no longer fails when the Raspberry Pi 4 hardware decoder changes stream resolution.\n\nApple TV protected playback remains unvalidated and unsupported on this Widevine L3 device.")
++B.Android15Release=new A.P("Android 15 Release","Platform and app compatibility","Tesla Android now runs on Android 15. This release adds the verified Compatibility Store (Aurora) for apps missing from Google Play and includes major display, browser audio, and virtual touchscreen reliability improvements.")
++B.Android15Streaming=new A.P("Streaming Compatibility","Netflix and Disney+ playback fixes","Netflix video playback is restored, and Disney+ adaptive-resolution playback no longer fails when the Raspberry Pi 4 hardware decoder changes stream resolution.\n\nApple TV protected playback remains unvalidated and unsupported on this Widevine L3, unprotected-output device.")
++B.Android15Items=A.a(s([B.Android15Release,B.Android15Streaming]),t.O)
++B.Android15Version=new A.bx("2026.39.a15.1",B.Android15Items)
+ B.CN=new A.P("Frontend Beta","Performance improvements","You can now access the beta Tesla Android frontend app at https://device.teslaandroid.com/beta. The new app uses much less memory and consumes less resources.")
+ B.CU=new A.P("Bluetooth Audio","Stability improvements","BT Audio shouldn't interfere with Browser Audio anymore, if you intend to pair your car with the device via BT make sure to disable Browser Audio first.")
  B.Ka=A.a(s([B.CN,B.CU]),t.O)
--B.a02=new A.bx("2026.22.1",B.Ka)
-+B.a02=new A.bx("2026.39.a15.1",B.Ka)
- B.DD=new A.P("NVMe Endurance","Stability improvements","This version improves NVMe reliability by reducing write caching that could have resulted in a corrupt filesystem on power loss.")
- B.MF=A.a(s([B.DD]),t.O)
- B.a0g=new A.bx("2026.3.1",B.MF)
-@@ -86034,7 +86034,7 @@ B.TI=new A.E(1/0,56)
+@@ -83769,7 +83773,7 @@ B.a_T=new A.bx("2022.25.1",B.K2)
+ B.Ci=new A.P("Initial release","Hello world!","Hello world!\nWelcome to the first Alpha of Tesla Android!\nGetting to this point has been a long bumpy ride, I hope that you'll enjoy running Android Apps in your Tesla!\nBest regards, \nMicha\u0142 Gapi\u0144ski \n@mikegapinski")
+ B.JN=A.a(s([B.Ci]),t.O)
+ B.a0_=new A.bx("2022.18.1",B.JN)
+-B.fo=A.a(s([B.a02,B.a0g,B.a0l,B.a0h,B.a0a,B.a_Q,B.a00,B.a_X,B.a08,B.a0j,B.a_Z,B.a_Y,B.a0k,B.a0e,B.a_S,B.a0c,B.a0i,B.a05,B.a0m,B.a_U,B.a09,B.a0d,B.a_W,B.a0b,B.a04,B.a0f,B.a07,B.a_V,B.a01,B.a_R,B.a03,B.a06,B.a_T,B.a0_]),A.a6("v<bx>"))
++B.fo=A.a(s([B.Android15Version,B.a02,B.a0g,B.a0l,B.a0h,B.a0a,B.a_Q,B.a00,B.a_X,B.a08,B.a0j,B.a_Z,B.a_Y,B.a0k,B.a0e,B.a_S,B.a0c,B.a0i,B.a05,B.a0m,B.a_U,B.a09,B.a0d,B.a_W,B.a0b,B.a04,B.a0f,B.a07,B.a_V,B.a01,B.a_R,B.a03,B.a06,B.a_T,B.a0_]),A.a6("v<bx>"))
+ B.Bi=new A.K0()
+ B.Bj=new A.a9m()
+ B.Bk=new A.a9n()
+@@ -86034,7 +86038,7 @@ B.TI=new A.E(1/0,56)
  B.TJ=new A.er(12,null,null,null)
  B.TK=new A.er(16,null,null,null)
  B.TL=new A.er(8,null,null,null)
@@ -744,7 +747,7 @@ index 834e74d..364b6ef 100644
  B.TM=new A.er(300,null,B.Zo,null)
  B.TN=new A.er(null,12,null,null)
  B.yd=new A.er(null,16,null,null)
-@@ -86416,7 +86416,7 @@ B.Zk=new A.bo("MAIN DISPLAY",null,null,null,null,null,null,null,null)
+@@ -86416,7 +86420,7 @@ B.Zk=new A.bo("MAIN DISPLAY",null,null,null,null,null,null,null,null)
  B.Zp=new A.bo("Failed to save your new Wi-Fi configuration",null,null,null,null,null,null,null,null)
  B.Zr=new A.bo("Are you using a rear display?\nCertain features won't function on the main screen in motion.\nYou can change the selection in Tesla Android Settings.",null,null,null,null,null,null,null,null)
  B.Zs=new A.bo("Display Type",null,null,null,null,null,null,null,null)

@@ -62,7 +62,10 @@ class Android15ReleasePresentationTest(unittest.TestCase):
             DONATION_URL,
             "Android 15 Release",
             "Streaming Compatibility",
-            "Apple TV protected playback remains unvalidated",
+            (
+                "Apple TV protected playback remains unvalidated and unsupported "
+                "on this Widevine L3, unprotected-output device."
+            ),
         ):
             with self.subTest(value=value):
                 self.assertIn(value, patch)
@@ -83,6 +86,31 @@ class Android15ReleasePresentationTest(unittest.TestCase):
             }.issubset(changed_paths)
         )
 
+    def test_new_release_precedes_preserved_2026_22_history(self):
+        patch = self.release_patch()
+        sections = {}
+        for path in (
+            "services/lighttpd/www-default/main.dart.js",
+            "services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js",
+        ):
+            start = patch.index(f"diff --git a/{path} b/{path}")
+            end = patch.find("\ndiff --git ", start + 1)
+            sections[path] = patch[start:] if end == -1 else patch[start:end]
+
+        beta = sections[
+            "services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js"
+        ]
+        self.assertRegex(beta, rf'(?m)^\+\s+"versionName": "{re.escape(RELEASE_VERSION)}"')
+        self.assertRegex(beta, r'(?m)^\s+"versionName": "2026\.22\.1"')
+        self.assertNotRegex(beta, r'(?m)^-.*2026\.22\.1')
+        self.assertLess(beta.index(RELEASE_VERSION), beta.index("2026.22.1"))
+
+        compiled = sections["services/lighttpd/www-default/main.dart.js"]
+        self.assertRegex(compiled, r'(?m)^ B\.CN=.*"Frontend Beta"')
+        self.assertRegex(compiled, r'(?m)^ B\.CU=.*"Bluetooth Audio"')
+        self.assertNotRegex(compiled, r'(?m)^-B\.(?:CN|CU)=')
+        self.assertIn("B.Android15Version,B.a02", compiled)
+
     def test_public_version_changes_without_forcing_boot_partition_rewrite(self):
         patch = self.release_patch()
         self.assertGreaterEqual(
@@ -95,12 +123,12 @@ class Android15ReleasePresentationTest(unittest.TestCase):
     def test_service_worker_uses_canonical_patched_blob_hashes(self):
         patch = self.release_patch()
         expected_hashes = {
-            "main.dart.js": "9453a655bc483696871f8a79bf3c460b",
+            "main.dart.js": "8eb476b14046985de2b57e6a8d56c911",
             "version.json": "ffbf02a1282eba29fc659aa4bfe8e635",
             "beta/index.html": "52e8d76061b987fc8c9bcea7aed92389",
             "beta/js/core/shared.js": "acf1abfb8169d3e5f12078f5ff1f9532",
             "beta/js/release-notes/release-notes-data.js": (
-                "38b0b384cfb818f7958078f0ce074f1c"
+                "89ee64bdef9c6b88d675543cb96c214a"
             ),
             "beta/assets/donations-qr.svg": "3450073a38e6d616d6ce6cdcaf9d0c22",
         }
