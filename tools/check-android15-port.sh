@@ -65,6 +65,10 @@ require_match "patches-aosp/vendor/tesla-android/0002-release-Brand-Android-15-w
 require_match "patches-aosp/vendor/tesla-android/0002-release-Brand-Android-15-work-week-39.patch" \
   'https://github\.com/chilman408/TeslaAndroid-R15-Rpi4' \
   "The About page must point to the Android 15 Raspberry Pi 4 fork"
+require_file "patches-aosp/packages/apps/Settings/0006-Add-Google-device-registration-page.patch" \
+  "Settings must provide the safe Google device registration workflow"
+require_file "patches-aosp/vendor/tesla-android/0003-Document-GSF-device-registration.patch" \
+  "Release notes must document the tested Google device registration recovery steps"
 require_file "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
   "Expanded userdata must not starve Android with background inode-table writes"
 require_match "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \
@@ -117,6 +121,9 @@ if ! python3 -m unittest -v tools/tests/test_android15_disney_plus_decoder.py; t
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_android15_release_presentation.py; then
+  failures=$((failures + 1))
+fi
+if ! python3 -m unittest -v tools/tests/test_android15_gsf_registration_ui.py; then
   failures=$((failures + 1))
 fi
 if ! python3 -m unittest -v tools/tests/test_apple_tv_codec_probe.py; then

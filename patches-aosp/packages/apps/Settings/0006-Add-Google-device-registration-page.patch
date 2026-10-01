@@ -1,0 +1,200 @@
+From ca2c2b89aaed41afe4f7087b7e770d4a2243c9b1 Mon Sep 17 00:00:00 2001
+From: lolento <hilman.chung@gmail.com>
+Date: Thu, 1 Oct 2026 12:52:09 -0700
+Subject: [PATCH] Add Google device registration page
+
+---
+ res/values/strings.xml                        | 15 +++
+ res/xml/gsf_registration_settings.xml         | 34 +++++++
+ res/xml/my_device_info.xml                    |  8 ++
+ .../gsf/GsfRegistrationFragment.java          | 92 +++++++++++++++++++
+ 4 files changed, 149 insertions(+)
+ create mode 100644 res/xml/gsf_registration_settings.xml
+ create mode 100644 src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
+
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index f92fd2aca8..d76daf5d9b 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -11454,6 +11454,21 @@
+     <!-- Title for preference category showing the name of device identifiers. [CHAR LIMIT=60]-->
+     <string name="my_device_info_device_identifiers_category_title">Device identifiers</string>
+ 
++    <!-- Title of the local custom-ROM registration page. [CHAR LIMIT=60] -->
++    <string name="gsf_registration_title">Google Play registration</string>
++    <!-- Summary of the local custom-ROM registration page. [CHAR LIMIT=NONE] -->
++    <string name="gsf_registration_summary">View the GSF Android ID used for Google device registration</string>
++    <!-- Action that opens Google Play services' installation identifier screen. [CHAR LIMIT=40] -->
++    <string name="gsf_registration_show_id">Show GSF Android ID</string>
++    <!-- Error shown if Google Play services cannot display the installation identifier. [CHAR LIMIT=NONE] -->
++    <string name="gsf_registration_id_unavailable">Google Play services ID screen is unavailable</string>
++    <!-- Action that opens Google's custom-ROM registration form. [CHAR LIMIT=50] -->
++    <string name="gsf_registration_open_google">Open Google registration page</string>
++    <!-- Error shown when no browser can open Google's registration form. [CHAR LIMIT=NONE] -->
++    <string name="gsf_registration_no_browser">No browser is available to open the registration page</string>
++    <!-- Instructions shown at the bottom of the custom-ROM registration page. [CHAR LIMIT=NONE] -->
++    <string name="gsf_registration_instructions">Select Show GSF Android ID. Google Play services may first download a small update; let it finish, then record the decimal ID it displays and submit it at Google's registration page. Registration is per installation and can take up to 24 hours. After waiting 24 hours, if Google Play Store or YouTube still shows the registration error, open the affected app's App info page, select Storage &amp; cache, clear storage, and reopen it. Do not clear Google Play services or Google Services Framework; that can create a new GSF Android ID that must be registered again. A clean flash or factory reset can also create a new ID.</string>
++
+     <!-- Title for Wifi Access settings [CHAR LIMIT=35] -->
+     <string name="change_wifi_state_title">Wi-Fi control</string>
+ 
+diff --git a/res/xml/gsf_registration_settings.xml b/res/xml/gsf_registration_settings.xml
+new file mode 100644
+index 0000000000..4c222073cf
+--- /dev/null
++++ b/res/xml/gsf_registration_settings.xml
+@@ -0,0 +1,34 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  Copyright (C) 2026 TeslaAndroid-R15-Rpi4
++
++  Licensed under the Apache License, Version 2.0 (the "License");
++  you may not use this file except in compliance with the License.
++  You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++  Unless required by applicable law or agreed to in writing, software
++  distributed under the License is distributed on an "AS IS" BASIS,
++  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  See the License for the specific language governing permissions and
++  limitations under the License.
++  -->
++<PreferenceScreen
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    android:title="@string/gsf_registration_title">
++
++    <Preference
++        android:key="show_gsf_android_id"
++        android:title="@string/gsf_registration_show_id"/>
++
++    <Preference
++        android:key="open_google_registration"
++        android:title="@string/gsf_registration_open_google"/>
++
++    <com.android.settingslib.widget.FooterPreference
++        android:key="gsf_registration_footer"
++        android:title="@string/gsf_registration_instructions"
++        android:selectable="false"/>
++
++</PreferenceScreen>
+diff --git a/res/xml/my_device_info.xml b/res/xml/my_device_info.xml
+index aec064b599..dfa09b91a3 100644
+--- a/res/xml/my_device_info.xml
++++ b/res/xml/my_device_info.xml
+@@ -203,6 +203,14 @@
+             android:summary="@string/summary_placeholder"
+             android:selectable="false"/>
+ 
++        <!-- Google custom-ROM device registration -->
++        <Preference
++            android:key="google_device_registration"
++            android:order="49"
++            android:title="@string/gsf_registration_title"
++            android:summary="@string/gsf_registration_summary"
++            android:fragment="com.android.settings.deviceinfo.gsf.GsfRegistrationFragment"/>
++
+         <!-- Manual -->
+         <Preference
+             android:key="manual"
+diff --git a/src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java b/src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
+new file mode 100644
+index 0000000000..0b37c0b5b2
+--- /dev/null
++++ b/src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
+@@ -0,0 +1,92 @@
++/*
++ * Copyright (C) 2026 TeslaAndroid-R15-Rpi4
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.deviceinfo.gsf;
++
++import android.app.settings.SettingsEnums;
++import android.content.ActivityNotFoundException;
++import android.content.Intent;
++import android.net.Uri;
++import android.os.Bundle;
++import android.widget.Toast;
++
++import androidx.preference.Preference;
++
++import com.android.settings.R;
++import com.android.settings.SettingsPreferenceFragment;
++
++public class GsfRegistrationFragment extends SettingsPreferenceFragment {
++    private static final String KEY_SHOW_ID = "show_gsf_android_id";
++    private static final String KEY_OPEN = "open_google_registration";
++    private static final String GSF_ID_ACTION =
++            "com.google.android.gms.permissions.ANDROID_ID_DEBUG_ACTIVITY";
++    private static final String REGISTRATION_URL =
++            "https://www.google.com/android/uncertified/";
++
++    @Override
++    public int getMetricsCategory() {
++        return SettingsEnums.DEVICEINFO;
++    }
++
++    @Override
++    public void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        addPreferencesFromResource(R.xml.gsf_registration_settings);
++    }
++
++    @Override
++    public boolean onPreferenceTreeClick(Preference preference) {
++        switch (preference.getKey()) {
++            case KEY_SHOW_ID:
++                showGsfAndroidId();
++                return true;
++            case KEY_OPEN:
++                openRegistrationPage();
++                return true;
++            default:
++                return super.onPreferenceTreeClick(preference);
++        }
++    }
++
++    private void showGsfAndroidId() {
++        final Intent intent = new Intent(GSF_ID_ACTION).setPackage("com.google.android.gms");
++        try {
++            if (intent.resolveActivity(requireContext().getPackageManager()) == null) {
++                showIdUnavailable();
++                return;
++            }
++            startActivity(intent);
++        } catch (ActivityNotFoundException exception) {
++            showIdUnavailable();
++        }
++    }
++
++    private void showIdUnavailable() {
++        Toast.makeText(requireContext(), R.string.gsf_registration_id_unavailable,
++                Toast.LENGTH_LONG).show();
++    }
++
++    private void openRegistrationPage() {
++        final Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(REGISTRATION_URL));
++        intent.addCategory(Intent.CATEGORY_BROWSABLE);
++        try {
++            startActivity(intent);
++        } catch (ActivityNotFoundException exception) {
++            Toast.makeText(requireContext(), R.string.gsf_registration_no_browser,
++                    Toast.LENGTH_LONG).show();
++        }
++    }
++}
+-- 
+2.45.2.windows.1
+
