@@ -1,4 +1,4 @@
-From ca2c2b89aaed41afe4f7087b7e770d4a2243c9b1 Mon Sep 17 00:00:00 2001
+From 180f7cdc64173b1bbe995b091ba2bc0fe46cd8d2 Mon Sep 17 00:00:00 2001
 From: lolento <hilman.chung@gmail.com>
 Date: Thu, 1 Oct 2026 12:52:09 -0700
 Subject: [PATCH] Add Google device registration page
@@ -13,7 +13,7 @@ Subject: [PATCH] Add Google device registration page
  create mode 100644 src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
 
 diff --git a/res/values/strings.xml b/res/values/strings.xml
-index f92fd2aca8..d76daf5d9b 100644
+index f92fd2aca8..60c5a671cd 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
 @@ -11454,6 +11454,21 @@
@@ -33,7 +33,7 @@ index f92fd2aca8..d76daf5d9b 100644
 +    <!-- Error shown when no browser can open Google's registration form. [CHAR LIMIT=NONE] -->
 +    <string name="gsf_registration_no_browser">No browser is available to open the registration page</string>
 +    <!-- Instructions shown at the bottom of the custom-ROM registration page. [CHAR LIMIT=NONE] -->
-+    <string name="gsf_registration_instructions">Select Show GSF Android ID. Google Play services may first download a small update; let it finish, then record the decimal ID it displays and submit it at Google's registration page. Registration is per installation and can take up to 24 hours. After waiting 24 hours, if Google Play Store or YouTube still shows the registration error, open the affected app's App info page, select Storage &amp; cache, clear storage, and reopen it. Do not clear Google Play services or Google Services Framework; that can create a new GSF Android ID that must be registered again. A clean flash or factory reset can also create a new ID.</string>
++    <string name="gsf_registration_instructions">Select Show GSF Android ID. Google Play services may first download a small update; let it finish, then record the decimal ID it displays and submit it at Google\'s registration page. Registration is per installation and can take up to 24 hours. After waiting 24 hours, if Google Play Store or YouTube still shows the registration error, open the affected app\'s App info page, select Storage &amp; cache, clear storage, and reopen it. Do not clear Google Play services or Google Services Framework; that can create a new GSF Android ID that must be registered again. A clean flash or factory reset can also create a new ID.</string>
 +
      <!-- Title for Wifi Access settings [CHAR LIMIT=35] -->
      <string name="change_wifi_state_title">Wi-Fi control</string>

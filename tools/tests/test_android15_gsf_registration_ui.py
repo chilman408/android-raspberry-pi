@@ -53,6 +53,8 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertNotIn("/data/user/", patch)
         self.assertNotIn("/data/data/", patch)
         self.assertNotIn("READ_GSERVICES", patch)
+        self.assertIn("Google\\'s registration page", patch)
+        self.assertIn("app\\'s App info page", patch)
 
     def test_id_is_not_exposed_through_teslaandroid_web_assets(self):
         settings_paths = set(
