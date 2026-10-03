@@ -24,6 +24,8 @@ RELEASE_NOTES_PATCH = (
 PORT_GATE = REPO_ROOT / "tools" / "check-android15-port.sh"
 
 REGISTRATION_URL = "https://www.google.com/android/uncertified/"
+GSERVICES_URI = "content://com.google.android.gsf.gservices"
+READ_GSERVICES = "com.google.android.providers.gsf.permission.READ_GSERVICES"
 ANDROID_ID_ACTION = "com.google.android.gms.permissions.ANDROID_ID_DEBUG_ACTIVITY"
 
 
@@ -38,12 +40,16 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         for value in (
             "Google Play registration",
             "GSF Android ID",
-            "Show GSF Android ID",
+            "Refresh GSF Android ID",
+            "Copy GSF Android ID",
             "Open Google registration page",
             REGISTRATION_URL,
-            ANDROID_ID_ACTION,
-            'setPackage("com.google.android.gms")',
-            "Google Play services ID screen is unavailable",
+            GSERVICES_URI,
+            READ_GSERVICES,
+            "GsfIdReader",
+            "GsfIdReaderTest",
+            "android_id",
+            "Not available yet",
         ):
             with self.subTest(value=value):
                 self.assertIn(value, patch)
@@ -52,7 +58,8 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertNotIn("Checkin.xml", patch)
         self.assertNotIn("/data/user/", patch)
         self.assertNotIn("/data/data/", patch)
-        self.assertNotIn("READ_GSERVICES", patch)
+        self.assertNotIn(ANDROID_ID_ACTION, patch)
+        self.assertNotIn('setPackage("com.google.android.gms")', patch)
         self.assertIn("Google\\'s registration page", patch)
         self.assertIn("app\\'s App info page", patch)
 
@@ -71,6 +78,9 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
             "Google Device Registration",
             "Settings > About device > Google Play registration",
             REGISTRATION_URL,
+            "Copy GSF Android ID",
+            "Refresh GSF Android ID",
+            "Not available yet",
             "Wait 24 hours",
             "Storage & cache > Clear storage",
             "Google Play Store or YouTube",
@@ -93,10 +103,10 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertNotRegex(patch, r"(?m)^[-+].*ro\.(?:product|build)\.")
 
         for asset, digest in (
-            ("main.dart.js", "ac7f90a4b15cad4fe0dbd056fc3a637a"),
+            ("main.dart.js", "7a5ceb3cad983af6f4636d9875b16437"),
             (
                 "beta/js/release-notes/release-notes-data.js",
-                "16cdbcb445b1292783243a1bcda67934",
+                "c9d75d45629edf891192e6e8dab08652",
             ),
         ):
             with self.subTest(asset=asset):

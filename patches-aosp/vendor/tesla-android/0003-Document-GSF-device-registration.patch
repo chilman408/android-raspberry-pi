@@ -1,4 +1,4 @@
-From 1ab214f4da97f7973008356ff0eea5fd50da3e07 Mon Sep 17 00:00:00 2001
+From bd84dca268f3aded39af8a96b751282ccb010797 Mon Sep 17 00:00:00 2001
 From: lolento <hilman.chung@gmail.com>
 Date: Thu, 1 Oct 2026 12:53:45 -0700
 Subject: [PATCH] Document GSF device registration
@@ -10,7 +10,7 @@ Subject: [PATCH] Document GSF device registration
  3 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js b/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js
-index 582b46e..2856e46 100644
+index 582b46e..fb077e5 100644
 --- a/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js
 +++ b/services/lighttpd/www-default/beta/js/release-notes/release-notes-data.js
 @@ -17,6 +17,11 @@
@@ -21,12 +21,12 @@ index 582b46e..2856e46 100644
 +        {
 +          "title": "Google Device Registration",
 +          "shortDescription": "Play Protect registration instructions",
-+          "descriptionMarkdown": "Open Settings > About device > Google Play registration, select Show GSF Android ID, and submit the decimal ID at https://www.google.com/android/uncertified/. Google Play services may first download a small update; let it finish.\n\nWait 24 hours after registration. If Google Play Store or YouTube still shows the registration error, open that affected app's App info page and select Storage & cache > Clear storage, then reopen the app.\n\nDo not clear Google Play services or Google Services Framework. Doing so, or performing a clean flash or factory reset, can create a new GSF Android ID that must be registered again."
++          "descriptionMarkdown": "Open Settings > About device > Google Play registration. The decimal GSF Android ID is displayed on that page; select Copy GSF Android ID and submit it at https://www.google.com/android/uncertified/. If the ID says Not available yet, connect to the internet, wait for Google Play services to finish setup, then select Refresh GSF Android ID.\n\nWait 24 hours after registration. If Google Play Store or YouTube still shows the registration error, open that affected app's App info page and select Storage & cache > Clear storage, then reopen the app.\n\nDo not clear Google Play services or Google Services Framework. Doing so, or performing a clean flash or factory reset, can create a new GSF Android ID that must be registered again."
          }
        ]
      },
 diff --git a/services/lighttpd/www-default/flutter_service_worker.js b/services/lighttpd/www-default/flutter_service_worker.js
-index b660c12..9444a0d 100644
+index b660c12..05af9f7 100644
 --- a/services/lighttpd/www-default/flutter_service_worker.js
 +++ b/services/lighttpd/www-default/flutter_service_worker.js
 @@ -16,7 +16,7 @@ const RESOURCES = {"beta/index.html": "52e8d76061b987fc8c9bcea7aed92389",
@@ -34,7 +34,7 @@ index b660c12..9444a0d 100644
  "beta/js/shell/shell-controller.js": "9db6493187e28ad2ede9b4856d7ffe6f",
  "beta/js/release-notes/release-notes-controller.js": "35c7981aad6dbf494fdc803f3d78ae0d",
 -"beta/js/release-notes/release-notes-data.js": "89ee64bdef9c6b88d675543cb96c214a",
-+"beta/js/release-notes/release-notes-data.js": "16cdbcb445b1292783243a1bcda67934",
++"beta/js/release-notes/release-notes-data.js": "c9d75d45629edf891192e6e8dab08652",
  "beta/js/audio/audio-ws-worker.js": "75e004b85ee8b049fe7965c07dc9cf44",
  "beta/js/audio/audioplayback.js": "3d8ccd0007411c38fbd66619c4f052cf",
  "beta/js/audio/audio-controller.js": "17777820a289e941b25c965733d914c2",
@@ -43,12 +43,12 @@ index b660c12..9444a0d 100644
  "index.html": "2a3ce84693bbc0358163ea001c3154c3",
  "/": "2a3ce84693bbc0358163ea001c3154c3",
 -"main.dart.js": "8eb476b14046985de2b57e6a8d56c911",
-+"main.dart.js": "ac7f90a4b15cad4fe0dbd056fc3a637a",
++"main.dart.js": "7a5ceb3cad983af6f4636d9875b16437",
  "reconnecting-websocket.js": "4ef9dd81c9e8157a1702623078c7ece1",
  "Decoder.js": "7754075ec40cf97622ccd750cb9031de",
  "flutter.js": "4b2350e14c6650ba82871f60906437ea",
 diff --git a/services/lighttpd/www-default/main.dart.js b/services/lighttpd/www-default/main.dart.js
-index 7fddc3c..39621ed 100644
+index 7fddc3c..6fe1c22 100644
 --- a/services/lighttpd/www-default/main.dart.js
 +++ b/services/lighttpd/www-default/main.dart.js
 @@ -83546,7 +83546,8 @@ B.Bh=new A.JM()
@@ -56,7 +56,7 @@ index 7fddc3c..39621ed 100644
  B.Android15Release=new A.P("Android 15 Release","Platform and app compatibility","Tesla Android now runs on Android 15. This release adds the verified Compatibility Store (Aurora) for apps missing from Google Play and includes major display, browser audio, and virtual touchscreen reliability improvements.")
  B.Android15Streaming=new A.P("Streaming Compatibility","Netflix and Disney+ playback fixes","Netflix video playback is restored, and Disney+ adaptive-resolution playback no longer fails when the Raspberry Pi 4 hardware decoder changes stream resolution.\n\nApple TV protected playback remains unvalidated and unsupported on this Widevine L3, unprotected-output device.")
 -B.Android15Items=A.a(s([B.Android15Release,B.Android15Streaming]),t.O)
-+B.Android15Gsf=new A.P("Google Device Registration","Play Protect registration instructions","Open Settings > About device > Google Play registration, select Show GSF Android ID, and submit the decimal ID at https://www.google.com/android/uncertified/. Google Play services may first download a small update; let it finish.\n\nWait 24 hours after registration. If Google Play Store or YouTube still shows the registration error, open that affected app's App info page and select Storage & cache > Clear storage, then reopen the app.\n\nDo not clear Google Play services or Google Services Framework. Doing so, or performing a clean flash or factory reset, can create a new GSF Android ID that must be registered again.")
++B.Android15Gsf=new A.P("Google Device Registration","Play Protect registration instructions","Open Settings > About device > Google Play registration. The decimal GSF Android ID is displayed on that page; select Copy GSF Android ID and submit it at https://www.google.com/android/uncertified/. If the ID says Not available yet, connect to the internet, wait for Google Play services to finish setup, then select Refresh GSF Android ID.\n\nWait 24 hours after registration. If Google Play Store or YouTube still shows the registration error, open that affected app's App info page and select Storage & cache > Clear storage, then reopen the app.\n\nDo not clear Google Play services or Google Services Framework. Doing so, or performing a clean flash or factory reset, can create a new GSF Android ID that must be registered again.")
 +B.Android15Items=A.a(s([B.Android15Release,B.Android15Streaming,B.Android15Gsf]),t.O)
  B.Android15Version=new A.bx("2026.39.a15.1",B.Android15Items)
  B.CN=new A.P("Frontend Beta","Performance improvements","You can now access the beta Tesla Android frontend app at https://device.teslaandroid.com/beta. The new app uses much less memory and consumes less resources.")
