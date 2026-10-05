@@ -73,8 +73,11 @@ require_match "patches-aosp/glodroid/configuration/0028-base-Export-GSF-ID-to-Se
   'SQLITE_OPEN_READONLY.*SQLITE_OPEN_NOMUTEX' \
   "The GSF ID exporter must open the Google Play services database read-only"
 require_match "patches-aosp/glodroid/configuration/0028-base-Export-GSF-ID-to-Settings.patch" \
-  'init_daemon_domain\(gsf_id_exporter\)' \
-  "The GSF ID exporter must run in its dedicated SELinux domain"
+  'seclabel u:r:su:s0' \
+  "The GSF ID exporter must use Android's existing userdebug-only privileged service domain"
+reject_match "patches-aosp/glodroid/configuration/0028-base-Export-GSF-ID-to-Settings.patch" \
+  'init_daemon_domain\(gsf_id_exporter\)|allow gsf_id_exporter privapp_data_file' \
+  "The GSF ID exporter must not reintroduce an Android 15 app-data neverallow violation"
 require_file "patches-aosp/vendor/tesla-android/0003-Document-GSF-device-registration.patch" \
   "Release notes must document the tested Google device registration recovery steps"
 require_file "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \

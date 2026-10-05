@@ -29,6 +29,7 @@ EXPORTER_PATCH = (
     / "0028-base-Export-GSF-ID-to-Settings.patch"
 )
 PORT_GATE = REPO_ROOT / "tools" / "check-android15-port.sh"
+BUILD_SCRIPT = REPO_ROOT / "build_rpi4.sh"
 
 REGISTRATION_URL = "https://www.google.com/android/uncertified/"
 GSF_ID_PROPERTY = "sys.tesla_android.gsf_id"
@@ -96,11 +97,6 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
             GSF_ID_PROPERTY,
             GSF_ID_READY_PROPERTY,
             GSF_ID_REFRESH_PROPERTY,
-            "init_daemon_domain(gsf_id_exporter)",
-            "mlstrustedsubject",
-            "allow gsf_id_exporter privapp_data_file:dir r_dir_perms",
-            "allow gsf_id_exporter privapp_data_file:file r_file_perms",
-            "set_prop(gsf_id_exporter, tesla_gsf_id_prop)",
             "get_prop(system_app, tesla_gsf_id_prop)",
             "set_prop(system_app, tesla_gsf_id_refresh_prop)",
         ):
@@ -121,6 +117,26 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertTrue(changed_paths)
         self.assertTrue(all(path.startswith("common/base/") for path in changed_paths))
         self.assertFalse(any("lighttpd" in path for path in changed_paths))
+
+    def test_exporter_uses_supported_userdebug_su_service_domain(self):
+        patch = self.read_patch(EXPORTER_PATCH)
+        build_script = BUILD_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("seclabel u:r:su:s0", patch)
+        self.assertIn("tesla_android_rpi4-trunk_staging-userdebug", build_script)
+        self.assertNotIn("init_daemon_domain(gsf_id_exporter)", patch)
+        self.assertNotIn("type gsf_id_exporter, domain", patch)
+        self.assertNotIn("gsf_id_exporter_exec", patch)
+        self.assertNotIn("allow gsf_id_exporter privapp_data_file", patch)
+        self.assertNotRegex(patch, r"(?m)^[-+].*private/(?:domain|mlstrustedsubject)\.te")
+
+    def test_only_init_and_debug_su_can_publish_the_gsf_id(self):
+        patch = self.read_patch(EXPORTER_PATCH)
+
+        self.assertIn(
+            "neverallow { domain -init -su } tesla_gsf_id_prop:property_service set;",
+            patch,
+        )
 
     def test_id_is_not_exposed_through_teslaandroid_web_assets(self):
         settings_paths = set(
@@ -177,6 +193,11 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertIn(SETTINGS_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
         self.assertIn(RELEASE_NOTES_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
         self.assertIn(EXPORTER_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
+        self.assertIn("seclabel u:r:su:s0", gate)
+        self.assertIn(
+            "init_daemon_domain\\(gsf_id_exporter\\)|allow gsf_id_exporter privapp_data_file",
+            gate,
+        )
 
 
 if __name__ == "__main__":
