@@ -21,11 +21,19 @@ RELEASE_NOTES_PATCH = (
     / "tesla-android"
     / "0003-Document-GSF-device-registration.patch"
 )
+EXPORTER_PATCH = (
+    REPO_ROOT
+    / "patches-aosp"
+    / "glodroid"
+    / "configuration"
+    / "0028-base-Export-GSF-ID-to-Settings.patch"
+)
 PORT_GATE = REPO_ROOT / "tools" / "check-android15-port.sh"
 
 REGISTRATION_URL = "https://www.google.com/android/uncertified/"
-GSERVICES_URI = "content://com.google.android.gsf.gservices"
-READ_GSERVICES = "com.google.android.providers.gsf.permission.READ_GSERVICES"
+GSF_ID_PROPERTY = "sys.tesla_android.gsf_id"
+GSF_ID_READY_PROPERTY = "sys.tesla_android.gsf_id_ready"
+GSF_ID_REFRESH_PROPERTY = "sys.tesla_android.gsf_id_refresh"
 ANDROID_ID_ACTION = "com.google.android.gms.permissions.ANDROID_ID_DEBUG_ACTIVITY"
 
 
@@ -44,12 +52,15 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
             "Copy GSF Android ID",
             "Open Google registration page",
             REGISTRATION_URL,
-            GSERVICES_URI,
-            READ_GSERVICES,
+            GSF_ID_PROPERTY,
+            GSF_ID_READY_PROPERTY,
+            GSF_ID_REFRESH_PROPERTY,
             "GsfIdReader",
             "GsfIdReaderTest",
-            "android_id",
             "Not available yet",
+            "Refreshing GSF Android ID",
+            "SystemProperties",
+            "isRefreshComplete",
         ):
             with self.subTest(value=value):
                 self.assertIn(value, patch)
@@ -58,10 +69,58 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertNotIn("Checkin.xml", patch)
         self.assertNotIn("/data/user/", patch)
         self.assertNotIn("/data/data/", patch)
+        self.assertNotIn("content://com.google.android.gsf.gservices", patch)
+        self.assertNotIn(
+            "com.google.android.providers.gsf.permission.READ_GSERVICES", patch
+        )
         self.assertNotIn(ANDROID_ID_ACTION, patch)
         self.assertNotIn('setPackage("com.google.android.gms")', patch)
         self.assertIn("Google\\'s registration page", patch)
         self.assertIn("app\\'s App info page", patch)
+
+    def test_exporter_is_hard_coded_read_only_and_one_shot(self):
+        patch = self.read_patch(EXPORTER_PATCH)
+
+        for value in (
+            "gsf_id_exporter",
+            "gsf-id-exporter",
+            "/data/user/0/com.google.android.gms/databases/gservices.db",
+            '"android_id"',
+            "SQLITE_OPEN_READONLY",
+            'SELECT value FROM \\"main\\" WHERE name = ?1 LIMIT 1',
+            "libsqlite",
+            "system_ext_specific: true",
+            "disabled",
+            "oneshot",
+            "sys.boot_completed=1",
+            GSF_ID_PROPERTY,
+            GSF_ID_READY_PROPERTY,
+            GSF_ID_REFRESH_PROPERTY,
+            "init_daemon_domain(gsf_id_exporter)",
+            "mlstrustedsubject",
+            "allow gsf_id_exporter privapp_data_file:dir r_dir_perms",
+            "allow gsf_id_exporter privapp_data_file:file r_file_perms",
+            "set_prop(gsf_id_exporter, tesla_gsf_id_prop)",
+            "get_prop(system_app, tesla_gsf_id_prop)",
+            "set_prop(system_app, tesla_gsf_id_refresh_prop)",
+        ):
+            with self.subTest(value=value):
+                self.assertIn(value, patch)
+
+        self.assertRegex(patch, r"(?m)^\+int main\(\) \{$")
+        self.assertNotRegex(patch, r"(?m)^\+int main\([^)]*(?:argc|argv)")
+        self.assertNotIn("SQLITE_OPEN_READWRITE", patch)
+        self.assertNotIn("SQLITE_OPEN_CREATE", patch)
+        self.assertNotIn("privapp_data_file:lnk_file", patch)
+        self.assertNotIn("persist.tesla_android.gsf", patch)
+        self.assertNotRegex(patch, r"(?m)^\+.*(?:popen|system\(|/system/bin/sh)")
+
+        changed_paths = set(
+            re.findall(r"(?m)^diff --git a/(\S+) b/\S+$", patch)
+        )
+        self.assertTrue(changed_paths)
+        self.assertTrue(all(path.startswith("common/base/") for path in changed_paths))
+        self.assertFalse(any("lighttpd" in path for path in changed_paths))
 
     def test_id_is_not_exposed_through_teslaandroid_web_assets(self):
         settings_paths = set(
@@ -117,6 +176,7 @@ class Android15GsfRegistrationUiTest(unittest.TestCase):
         self.assertIn("test_android15_gsf_registration_ui.py", gate)
         self.assertIn(SETTINGS_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
         self.assertIn(RELEASE_NOTES_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
+        self.assertIn(EXPORTER_PATCH.relative_to(REPO_ROOT).as_posix(), gate)
 
 
 if __name__ == "__main__":

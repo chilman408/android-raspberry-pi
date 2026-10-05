@@ -67,6 +67,14 @@ require_match "patches-aosp/vendor/tesla-android/0002-release-Brand-Android-15-w
   "The About page must point to the Android 15 Raspberry Pi 4 fork"
 require_file "patches-aosp/packages/apps/Settings/0006-Add-Google-device-registration-page.patch" \
   "Settings must provide the safe Google device registration workflow"
+require_file "patches-aosp/glodroid/configuration/0028-base-Export-GSF-ID-to-Settings.patch" \
+  "Settings must receive the GSF ID through the constrained one-shot exporter"
+require_match "patches-aosp/glodroid/configuration/0028-base-Export-GSF-ID-to-Settings.patch" \
+  'SQLITE_OPEN_READONLY.*SQLITE_OPEN_NOMUTEX' \
+  "The GSF ID exporter must open the Google Play services database read-only"
+require_match "patches-aosp/glodroid/configuration/0028-base-Export-GSF-ID-to-Settings.patch" \
+  'init_daemon_domain\(gsf_id_exporter\)' \
+  "The GSF ID exporter must run in its dedicated SELinux domain"
 require_file "patches-aosp/vendor/tesla-android/0003-Document-GSF-device-registration.patch" \
   "Release notes must document the tested Google device registration recovery steps"
 require_file "patches-aosp/glodroid/configuration/0027-userdata-Avoid-background-inode-table-starvation.patch" \

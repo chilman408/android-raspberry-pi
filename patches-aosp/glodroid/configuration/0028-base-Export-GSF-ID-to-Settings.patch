@@ -1,0 +1,282 @@
+From 03b7ced2fce1701b90bd7abd6ef3df07ff40a89d Mon Sep 17 00:00:00 2001
+From: lolento <hilman.chung@gmail.com>
+Date: Sun, 4 Oct 2026 22:14:16 -0700
+Subject: [PATCH] base: export GSF ID to Settings
+
+---
+ common/base/Android.bp                        |  30 +++++
+ common/base/board.mk                          |   1 +
+ common/base/device.mk                         |   1 +
+ common/base/gsf-id-exporter.rc                |  13 +++
+ common/base/gsf_id_exporter.cpp               | 110 ++++++++++++++++++
+ .../sepolicy/system_ext/private/file_contexts |   1 +
+ .../system_ext/private/gsf_id_exporter.te     |  17 +++
+ .../sepolicy/system_ext/private/property.te   |   4 +
+ .../system_ext/private/property_contexts      |   3 +
+ .../sepolicy/system_ext/private/system_app.te |   3 +
+ 10 files changed, 183 insertions(+)
+ create mode 100644 common/base/Android.bp
+ create mode 100644 common/base/gsf-id-exporter.rc
+ create mode 100644 common/base/gsf_id_exporter.cpp
+ create mode 100644 common/base/sepolicy/system_ext/private/file_contexts
+ create mode 100644 common/base/sepolicy/system_ext/private/gsf_id_exporter.te
+ create mode 100644 common/base/sepolicy/system_ext/private/property.te
+ create mode 100644 common/base/sepolicy/system_ext/private/property_contexts
+ create mode 100644 common/base/sepolicy/system_ext/private/system_app.te
+
+diff --git a/common/base/Android.bp b/common/base/Android.bp
+new file mode 100644
+index 0000000..87aef6f
+--- /dev/null
++++ b/common/base/Android.bp
+@@ -0,0 +1,30 @@
++// Copyright 2026 TeslaAndroid-R15-Rpi4
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++cc_binary {
++    name: "gsf_id_exporter",
++    stem: "gsf-id-exporter",
++    srcs: ["gsf_id_exporter.cpp"],
++    shared_libs: [
++        "libbase",
++        "libsqlite",
++    ],
++    cflags: [
++        "-Wall",
++        "-Werror",
++        "-Wextra",
++    ],
++    init_rc: ["gsf-id-exporter.rc"],
++    system_ext_specific: true,
++}
+diff --git a/common/base/board.mk b/common/base/board.mk
+index 2566e31..1670a41 100644
+--- a/common/base/board.mk
++++ b/common/base/board.mk
+@@ -175,6 +175,7 @@ DEVICE_MATRIX_FILE := $(B_LOCAL_PATH)/compatibility_matrix.xml
+ 
+ # SELinux support
+ BOARD_VENDOR_SEPOLICY_DIRS       += $(B_LOCAL_PATH)/sepolicy/vendor
++SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += $(B_LOCAL_PATH)/sepolicy/system_ext/private
+ 
+ # Enable GloDroid-specific build targets
+ BOARD_USES_GLODROID_MAKE_TARGETS := true
+diff --git a/common/base/device.mk b/common/base/device.mk
+index e3e6200..b2cb20c 100644
+--- a/common/base/device.mk
++++ b/common/base/device.mk
+@@ -70,6 +70,7 @@ PRODUCT_BUILD_SUPER_PARTITION := true
+ PRODUCT_PACKAGES += \
+     glodroid_overlay_frameworks_base_core \
+     glodroid_overlay_settings_provider \
++    gsf_id_exporter \
+ 
+ # A/B
+ PRODUCT_PACKAGES += \
+diff --git a/common/base/gsf-id-exporter.rc b/common/base/gsf-id-exporter.rc
+new file mode 100644
+index 0000000..0137b98
+--- /dev/null
++++ b/common/base/gsf-id-exporter.rc
+@@ -0,0 +1,13 @@
++# Export only the decimal GSF Android ID for the local Settings registration page.
++service gsf_id_exporter /system_ext/bin/gsf-id-exporter
++    class late_start
++    user root
++    group root
++    disabled
++    oneshot
++
++on property:sys.boot_completed=1
++    start gsf_id_exporter
++
++on property:sys.tesla_android.gsf_id_refresh=*
++    start gsf_id_exporter
+diff --git a/common/base/gsf_id_exporter.cpp b/common/base/gsf_id_exporter.cpp
+new file mode 100644
+index 0000000..610b152
+--- /dev/null
++++ b/common/base/gsf_id_exporter.cpp
+@@ -0,0 +1,110 @@
++/*
++ * Copyright 2026 TeslaAndroid-R15-Rpi4
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <android-base/properties.h>
++#include <sqlite3.h>
++#include <unistd.h>
++
++#include <string>
++#include <string_view>
++#include <utility>
++
++namespace {
++
++constexpr char kDatabasePath[] =
++        "/data/user/0/com.google.android.gms/databases/gservices.db";
++constexpr char kIdProperty[] = "sys.tesla_android.gsf_id";
++constexpr char kReadyProperty[] = "sys.tesla_android.gsf_id_ready";
++constexpr char kRefreshProperty[] = "sys.tesla_android.gsf_id_refresh";
++constexpr char kAndroidIdKey[] = "android_id";
++constexpr int kMaxAttempts = 120;
++constexpr unsigned int kRetryDelaySeconds = 5;
++
++bool IsValidGsfId(std::string_view value) {
++    if (value.empty() || value.size() > 20) {
++        return false;
++    }
++
++    bool hasNonZeroDigit = false;
++    for (const char character : value) {
++        if (character < '0' || character > '9') {
++            return false;
++        }
++        hasNonZeroDigit |= character != '0';
++    }
++    return hasNonZeroDigit;
++}
++
++bool ReadGsfId(std::string* value) {
++    sqlite3* database = nullptr;
++    const int openResult = sqlite3_open_v2(
++            kDatabasePath, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nullptr);
++    if (openResult != SQLITE_OK) {
++        if (database != nullptr) {
++            sqlite3_close(database);
++        }
++        return false;
++    }
++
++    sqlite3_stmt* statement = nullptr;
++    constexpr char kQuery[] =
++            "SELECT value FROM \"main\" WHERE name = ?1 LIMIT 1";
++    bool success = false;
++    if (sqlite3_prepare_v2(database, kQuery, -1, &statement, nullptr) == SQLITE_OK
++            && sqlite3_bind_text(statement, 1, kAndroidIdKey, -1, SQLITE_STATIC) == SQLITE_OK
++            && sqlite3_step(statement) == SQLITE_ROW) {
++        const unsigned char* result = sqlite3_column_text(statement, 0);
++        const int resultSize = sqlite3_column_bytes(statement, 0);
++        if (result != nullptr && resultSize > 0) {
++            std::string candidate(reinterpret_cast<const char*>(result), resultSize);
++            if (IsValidGsfId(candidate)) {
++                *value = std::move(candidate);
++                success = true;
++            }
++        }
++    }
++
++    if (statement != nullptr) {
++        sqlite3_finalize(statement);
++    }
++    sqlite3_close(database);
++    return success;
++}
++
++}  // namespace
++
++int main() {
++    // Never leave a value from a previous Google Play services installation visible.
++    if (!android::base::SetProperty(kIdProperty, "")) {
++        return 2;
++    }
++
++    for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
++        std::string id;
++        if (ReadGsfId(&id)) {
++            if (!android::base::SetProperty(kIdProperty, id)) {
++                return 2;
++            }
++            const std::string refreshToken =
++                    android::base::GetProperty(kRefreshProperty, "boot");
++            return android::base::SetProperty(kReadyProperty, refreshToken) ? 0 : 2;
++        }
++        if (attempt + 1 < kMaxAttempts) {
++            sleep(kRetryDelaySeconds);
++        }
++    }
++    return 1;
++}
+diff --git a/common/base/sepolicy/system_ext/private/file_contexts b/common/base/sepolicy/system_ext/private/file_contexts
+new file mode 100644
+index 0000000..35fdf9f
+--- /dev/null
++++ b/common/base/sepolicy/system_ext/private/file_contexts
+@@ -0,0 +1 @@
++/system_ext/bin/gsf-id-exporter    u:object_r:gsf_id_exporter_exec:s0
+diff --git a/common/base/sepolicy/system_ext/private/gsf_id_exporter.te b/common/base/sepolicy/system_ext/private/gsf_id_exporter.te
+new file mode 100644
+index 0000000..36c970a
+--- /dev/null
++++ b/common/base/sepolicy/system_ext/private/gsf_id_exporter.te
+@@ -0,0 +1,17 @@
++type gsf_id_exporter, domain, coredomain, mlstrustedsubject;
++type gsf_id_exporter_exec, exec_type, system_file_type, file_type;
++
++init_daemon_domain(gsf_id_exporter)
++
++# The executable has no arguments or IPC surface. It reads one hard-coded row from
++# the Google Play services GServices database and exits after publishing the value.
++allow gsf_id_exporter system_data_root_file:dir search;
++allow gsf_id_exporter system_userdir_file:dir search;
++allow gsf_id_exporter system_data_file:dir search;
++allow gsf_id_exporter privapp_data_file:dir r_dir_perms;
++allow gsf_id_exporter privapp_data_file:file r_file_perms;
++
++set_prop(gsf_id_exporter, tesla_gsf_id_prop)
++get_prop(gsf_id_exporter, tesla_gsf_id_refresh_prop)
++
++neverallow { domain -init -gsf_id_exporter } tesla_gsf_id_prop:property_service set;
+diff --git a/common/base/sepolicy/system_ext/private/property.te b/common/base/sepolicy/system_ext/private/property.te
+new file mode 100644
+index 0000000..79721b7
+--- /dev/null
++++ b/common/base/sepolicy/system_ext/private/property.te
+@@ -0,0 +1,4 @@
++system_internal_prop(tesla_gsf_id_prop)
++system_internal_prop(tesla_gsf_id_refresh_prop)
++
++neverallow { domain -init -system_app } tesla_gsf_id_refresh_prop:property_service set;
+diff --git a/common/base/sepolicy/system_ext/private/property_contexts b/common/base/sepolicy/system_ext/private/property_contexts
+new file mode 100644
+index 0000000..60fb368
+--- /dev/null
++++ b/common/base/sepolicy/system_ext/private/property_contexts
+@@ -0,0 +1,3 @@
++sys.tesla_android.gsf_id          u:object_r:tesla_gsf_id_prop:s0          exact string
++sys.tesla_android.gsf_id_ready    u:object_r:tesla_gsf_id_prop:s0          exact string
++sys.tesla_android.gsf_id_refresh  u:object_r:tesla_gsf_id_refresh_prop:s0  exact string
+diff --git a/common/base/sepolicy/system_ext/private/system_app.te b/common/base/sepolicy/system_ext/private/system_app.te
+new file mode 100644
+index 0000000..bfe3705
+--- /dev/null
++++ b/common/base/sepolicy/system_ext/private/system_app.te
+@@ -0,0 +1,3 @@
++# Settings runs in system_app. Other browser-facing TeslaAndroid services do not.
++get_prop(system_app, tesla_gsf_id_prop)
++set_prop(system_app, tesla_gsf_id_refresh_prop)
+-- 
+2.45.2.windows.1
+

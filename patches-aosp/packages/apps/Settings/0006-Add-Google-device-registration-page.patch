@@ -1,39 +1,26 @@
-From fc71ee839caf623090bc394c0e9d024d7026dc67 Mon Sep 17 00:00:00 2001
+From 28c59b7df7558c6aa4f5db27cce4d7adc36a991b Mon Sep 17 00:00:00 2001
 From: lolento <hilman.chung@gmail.com>
 Date: Thu, 1 Oct 2026 12:52:09 -0700
 Subject: [PATCH] Add Google device registration page
 
 ---
- AndroidManifest.xml                           |   1 +
- res/values/strings.xml                        |  21 ++++
- res/xml/gsf_registration_settings.xml         |  45 +++++++
- res/xml/my_device_info.xml                    |   8 ++
- .../settings/deviceinfo/gsf/GsfIdReader.java  |  64 ++++++++++
- .../gsf/GsfRegistrationFragment.java          | 115 ++++++++++++++++++
- .../deviceinfo/gsf/GsfIdReaderTest.java       |  74 +++++++++++
- 7 files changed, 328 insertions(+)
+ res/values/strings.xml                        |  23 +++
+ res/xml/gsf_registration_settings.xml         |  45 +++++
+ res/xml/my_device_info.xml                    |   8 +
+ .../settings/deviceinfo/gsf/GsfIdReader.java  | 109 ++++++++++++
+ .../gsf/GsfRegistrationFragment.java          | 161 ++++++++++++++++++
+ .../deviceinfo/gsf/GsfIdReaderTest.java       | 109 ++++++++++++
+ 6 files changed, 455 insertions(+)
  create mode 100644 res/xml/gsf_registration_settings.xml
  create mode 100644 src/com/android/settings/deviceinfo/gsf/GsfIdReader.java
  create mode 100644 src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
  create mode 100644 tests/robotests/src/com/android/settings/deviceinfo/gsf/GsfIdReaderTest.java
 
-diff --git a/AndroidManifest.xml b/AndroidManifest.xml
-index 69d000a9e8..5caa9ef419 100644
---- a/AndroidManifest.xml
-+++ b/AndroidManifest.xml
-@@ -42,6 +42,7 @@
-     <uses-permission android:name="android.permission.QUERY_AUDIO_STATE" />
-     <uses-permission android:name="android.permission.MASTER_CLEAR" />
-     <uses-permission android:name="com.google.android.googleapps.permission.GOOGLE_AUTH" android:maxSdkVersion="34"/>
-+    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" />
-     <uses-permission android:name="android.permission.ACCESS_DOWNLOAD_MANAGER" />
-     <uses-permission android:name="android.permission.READ_CONTACTS" />
-     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 diff --git a/res/values/strings.xml b/res/values/strings.xml
-index f92fd2aca8..7d0540e5d8 100644
+index f92fd2aca8..ff45f1aba3 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
-@@ -11454,6 +11454,27 @@
+@@ -11454,6 +11454,29 @@
      <!-- Title for preference category showing the name of device identifiers. [CHAR LIMIT=60]-->
      <string name="my_device_info_device_identifiers_category_title">Device identifiers</string>
  
@@ -45,6 +32,8 @@ index f92fd2aca8..7d0540e5d8 100644
 +    <string name="gsf_registration_id_title">GSF Android ID</string>
 +    <!-- Summary shown while Google Services Framework has not generated an identifier. [CHAR LIMIT=NONE] -->
 +    <string name="gsf_registration_id_unavailable">Not available yet. Connect to the internet, wait for Google Play services to finish setup, then select Refresh GSF Android ID.</string>
++    <!-- Summary shown while the local system helper is refreshing the identifier. [CHAR LIMIT=NONE] -->
++    <string name="gsf_registration_id_refreshing">Refreshing GSF Android ID…</string>
 +    <!-- Action that reads the installation identifier again. [CHAR LIMIT=40] -->
 +    <string name="gsf_registration_refresh_id">Refresh GSF Android ID</string>
 +    <!-- Action that copies the installation identifier. [CHAR LIMIT=40] -->
@@ -133,10 +122,10 @@ index aec064b599..dfa09b91a3 100644
              android:key="manual"
 diff --git a/src/com/android/settings/deviceinfo/gsf/GsfIdReader.java b/src/com/android/settings/deviceinfo/gsf/GsfIdReader.java
 new file mode 100644
-index 0000000000..ee89af6386
+index 0000000000..f5c7812878
 --- /dev/null
 +++ b/src/com/android/settings/deviceinfo/gsf/GsfIdReader.java
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,109 @@
 +/*
 + * Copyright (C) 2026 TeslaAndroid-R15-Rpi4
 + *
@@ -155,58 +144,103 @@ index 0000000000..ee89af6386
 +
 +package com.android.settings.deviceinfo.gsf;
 +
-+import android.content.ContentResolver;
-+import android.database.Cursor;
-+import android.net.Uri;
++import android.os.SystemClock;
++import android.os.SystemProperties;
 +import android.text.TextUtils;
 +import android.util.Log;
 +
 +import androidx.annotation.Nullable;
 +
 +final class GsfIdReader {
-+    static final Uri GSERVICES_URI = Uri.parse("content://com.google.android.gsf.gservices");
++    static final String GSF_ID_PROPERTY = "sys.tesla_android.gsf_id";
++    static final String GSF_ID_READY_PROPERTY = "sys.tesla_android.gsf_id_ready";
++    static final String GSF_ID_REFRESH_PROPERTY = "sys.tesla_android.gsf_id_refresh";
 +
 +    private static final String TAG = "GsfIdReader";
-+    private static final String ANDROID_ID_KEY = "android_id";
-+    private static final String VALUE_COLUMN = "value";
++    private static final int MAX_GSF_ID_LENGTH = 20;
++    private static final PropertyAccess SYSTEM_PROPERTIES = new PropertyAccess() {
++        @Override
++        public String get(String name) {
++            return SystemProperties.get(name);
++        }
++
++        @Override
++        public void set(String name, String value) {
++            SystemProperties.set(name, value);
++        }
++    };
 +
 +    private GsfIdReader() {}
 +
 +    @Nullable
-+    static String read(ContentResolver resolver) {
-+        try (Cursor cursor = resolver.query(
-+                GSERVICES_URI,
-+                null,
-+                null,
-+                new String[] {ANDROID_ID_KEY},
-+                null)) {
-+            if (cursor == null || !cursor.moveToFirst()) {
-+                return null;
-+            }
-+            int valueColumn = cursor.getColumnIndex(VALUE_COLUMN);
-+            if (valueColumn < 0 && cursor.getColumnCount() > 1) {
-+                valueColumn = 1;
-+            }
-+            if (valueColumn < 0) {
-+                return null;
-+            }
-+            final String value = cursor.getString(valueColumn);
-+            if (TextUtils.isEmpty(value) || !TextUtils.isDigitsOnly(value)) {
-+                return null;
-+            }
-+            return value;
++    static String read() {
++        return read(SYSTEM_PROPERTIES);
++    }
++
++    @Nullable
++    static String read(PropertyAccess properties) {
++        try {
++            return sanitize(properties.get(GSF_ID_PROPERTY));
 +        } catch (RuntimeException exception) {
 +            Log.w(TAG, "Unable to read GSF Android ID", exception);
 +            return null;
 +        }
 +    }
++
++    @Nullable
++    static String requestRefresh() {
++        final String token = Long.toString(SystemClock.elapsedRealtimeNanos());
++        return requestRefresh(SYSTEM_PROPERTIES, token) ? token : null;
++    }
++
++    static boolean requestRefresh(PropertyAccess properties, String token) {
++        try {
++            properties.set(GSF_ID_REFRESH_PROPERTY, token);
++            return true;
++        } catch (RuntimeException exception) {
++            Log.w(TAG, "Unable to request a GSF Android ID refresh", exception);
++            return false;
++        }
++    }
++
++    static boolean isRefreshComplete(String token) {
++        return isRefreshComplete(SYSTEM_PROPERTIES, token);
++    }
++
++    static boolean isRefreshComplete(PropertyAccess properties, String token) {
++        try {
++            return token.equals(properties.get(GSF_ID_READY_PROPERTY));
++        } catch (RuntimeException exception) {
++            Log.w(TAG, "Unable to read GSF Android ID refresh status", exception);
++            return false;
++        }
++    }
++
++    @Nullable
++    private static String sanitize(String value) {
++        if (TextUtils.isEmpty(value) || value.length() > MAX_GSF_ID_LENGTH
++                || !TextUtils.isDigitsOnly(value)) {
++            return null;
++        }
++        for (int index = 0; index < value.length(); ++index) {
++            if (value.charAt(index) != '0') {
++                return value;
++            }
++        }
++        return null;
++    }
++
++    interface PropertyAccess {
++        String get(String name);
++        void set(String name, String value);
++    }
 +}
 diff --git a/src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java b/src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
 new file mode 100644
-index 0000000000..a800a89130
+index 0000000000..9ac6d980de
 --- /dev/null
 +++ b/src/com/android/settings/deviceinfo/gsf/GsfRegistrationFragment.java
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,161 @@
 +/*
 + * Copyright (C) 2026 TeslaAndroid-R15-Rpi4
 + *
@@ -232,6 +266,8 @@ index 0000000000..a800a89130
 +import android.content.Intent;
 +import android.net.Uri;
 +import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
 +import android.widget.Toast;
 +
 +import androidx.preference.Preference;
@@ -246,10 +282,16 @@ index 0000000000..a800a89130
 +    private static final String KEY_OPEN = "open_google_registration";
 +    private static final String REGISTRATION_URL =
 +            "https://www.google.com/android/uncertified/";
++    private static final long REFRESH_POLL_DELAY_MILLIS = 500;
++    private static final int REFRESH_POLL_ATTEMPTS = 30;
 +
 +    private Preference mIdPreference;
 +    private Preference mCopyPreference;
 +    private String mGsfAndroidId;
++    private String mRefreshToken;
++    private int mRefreshAttemptsRemaining;
++    private final Handler mHandler = new Handler(Looper.getMainLooper());
++    private final Runnable mRefreshRunnable = this::pollForRefreshedId;
 +
 +    @Override
 +    public int getMetricsCategory() {
@@ -267,14 +309,20 @@ index 0000000000..a800a89130
 +    @Override
 +    public void onResume() {
 +        super.onResume();
-+        refreshGsfAndroidId();
++        updateGsfAndroidId();
++    }
++
++    @Override
++    public void onPause() {
++        mHandler.removeCallbacks(mRefreshRunnable);
++        super.onPause();
 +    }
 +
 +    @Override
 +    public boolean onPreferenceTreeClick(Preference preference) {
 +        switch (preference.getKey()) {
 +            case KEY_REFRESH:
-+                refreshGsfAndroidId();
++                requestGsfAndroidIdRefresh();
 +                return true;
 +            case KEY_COPY:
 +                copyGsfAndroidId();
@@ -287,8 +335,40 @@ index 0000000000..a800a89130
 +        }
 +    }
 +
-+    private void refreshGsfAndroidId() {
-+        mGsfAndroidId = GsfIdReader.read(requireContext().getContentResolver());
++    private void requestGsfAndroidIdRefresh() {
++        mHandler.removeCallbacks(mRefreshRunnable);
++        mRefreshAttemptsRemaining = REFRESH_POLL_ATTEMPTS;
++        showRefreshingState();
++        mRefreshToken = GsfIdReader.requestRefresh();
++        if (mRefreshToken == null) {
++            mRefreshAttemptsRemaining = 0;
++            updateGsfAndroidId();
++            return;
++        }
++        mHandler.postDelayed(mRefreshRunnable, REFRESH_POLL_DELAY_MILLIS);
++    }
++
++    private void pollForRefreshedId() {
++        if (GsfIdReader.isRefreshComplete(mRefreshToken)) {
++            updateGsfAndroidId();
++            return;
++        }
++        if (--mRefreshAttemptsRemaining <= 0) {
++            updateGsfAndroidId();
++            return;
++        }
++        mHandler.postDelayed(mRefreshRunnable, REFRESH_POLL_DELAY_MILLIS);
++    }
++
++    private void showRefreshingState() {
++        mGsfAndroidId = null;
++        mIdPreference.setSummary(R.string.gsf_registration_id_refreshing);
++        mIdPreference.setCopyingEnabled(false);
++        mCopyPreference.setEnabled(false);
++    }
++
++    private void updateGsfAndroidId() {
++        mGsfAndroidId = GsfIdReader.read();
 +        final boolean available = mGsfAndroidId != null;
 +        mIdPreference.setSummary(available
 +                ? mGsfAndroidId : getString(R.string.gsf_registration_id_unavailable));
@@ -324,10 +404,10 @@ index 0000000000..a800a89130
 +}
 diff --git a/tests/robotests/src/com/android/settings/deviceinfo/gsf/GsfIdReaderTest.java b/tests/robotests/src/com/android/settings/deviceinfo/gsf/GsfIdReaderTest.java
 new file mode 100644
-index 0000000000..05af6c3cc2
+index 0000000000..c61489d0e9
 --- /dev/null
 +++ b/tests/robotests/src/com/android/settings/deviceinfo/gsf/GsfIdReaderTest.java
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,109 @@
 +/*
 + * Copyright (C) 2026 TeslaAndroid-R15-Rpi4
 + *
@@ -348,58 +428,93 @@ index 0000000000..05af6c3cc2
 +
 +import static com.google.common.truth.Truth.assertThat;
 +
-+import static org.mockito.ArgumentMatchers.any;
-+import static org.mockito.ArgumentMatchers.eq;
-+import static org.mockito.ArgumentMatchers.isNull;
-+import static org.mockito.Mockito.mock;
-+import static org.mockito.Mockito.when;
-+
-+import android.content.ContentResolver;
-+import android.database.MatrixCursor;
-+
-+import org.junit.Before;
 +import org.junit.Test;
 +import org.junit.runner.RunWith;
 +import org.robolectric.RobolectricTestRunner;
 +
 +@RunWith(RobolectricTestRunner.class)
 +public class GsfIdReaderTest {
-+    private ContentResolver mResolver;
-+
-+    @Before
-+    public void setUp() {
-+        mResolver = mock(ContentResolver.class);
-+    }
-+
 +    @Test
 +    public void read_decimalId_returnsValue() {
-+        final MatrixCursor cursor = new MatrixCursor(new String[] {"name", "value"});
-+        cursor.addRow(new Object[] {"android_id", "1234567890123456789"});
-+        when(mResolver.query(
-+                eq(GsfIdReader.GSERVICES_URI),
-+                isNull(),
-+                isNull(),
-+                eq(new String[] {"android_id"}),
-+                isNull())).thenReturn(cursor);
++        final FakePropertyAccess properties = new FakePropertyAccess();
++        properties.mId = "1234567890123456789";
 +
-+        assertThat(GsfIdReader.read(mResolver)).isEqualTo("1234567890123456789");
++        assertThat(GsfIdReader.read(properties)).isEqualTo("1234567890123456789");
 +    }
 +
 +    @Test
 +    public void read_nonDecimalValue_returnsNull() {
-+        final MatrixCursor cursor = new MatrixCursor(new String[] {"name", "value"});
-+        cursor.addRow(new Object[] {"android_id", "not-an-id"});
-+        when(mResolver.query(any(), isNull(), isNull(), any(), isNull())).thenReturn(cursor);
++        final FakePropertyAccess properties = new FakePropertyAccess();
++        properties.mId = "not-an-id";
 +
-+        assertThat(GsfIdReader.read(mResolver)).isNull();
++        assertThat(GsfIdReader.read(properties)).isNull();
 +    }
 +
 +    @Test
-+    public void read_queryFailure_returnsNull() {
-+        when(mResolver.query(any(), isNull(), isNull(), any(), isNull()))
-+                .thenThrow(new SecurityException("denied"));
++    public void read_zeroOrOversizedValue_returnsNull() {
++        final FakePropertyAccess properties = new FakePropertyAccess();
++        properties.mId = "0000000000000000000";
++        assertThat(GsfIdReader.read(properties)).isNull();
 +
-+        assertThat(GsfIdReader.read(mResolver)).isNull();
++        properties.mId = "123456789012345678901";
++        assertThat(GsfIdReader.read(properties)).isNull();
++    }
++
++    @Test
++    public void requestRefresh_writesUniqueToken() {
++        final FakePropertyAccess properties = new FakePropertyAccess();
++
++        assertThat(GsfIdReader.requestRefresh(properties, "123456789")).isTrue();
++        assertThat(properties.mRefreshToken).isEqualTo("123456789");
++    }
++
++    @Test
++    public void isRefreshComplete_requiresMatchingAcknowledgement() {
++        final FakePropertyAccess properties = new FakePropertyAccess();
++        properties.mReadyToken = "123456789";
++
++        assertThat(GsfIdReader.isRefreshComplete(properties, "123456789")).isTrue();
++        assertThat(GsfIdReader.isRefreshComplete(properties, "987654321")).isFalse();
++    }
++
++    @Test
++    public void propertyFailure_isContained() {
++        final GsfIdReader.PropertyAccess properties = new GsfIdReader.PropertyAccess() {
++            @Override
++            public String get(String name) {
++                throw new SecurityException("denied");
++            }
++
++            @Override
++            public void set(String name, String value) {
++                throw new SecurityException("denied");
++            }
++        };
++
++        assertThat(GsfIdReader.read(properties)).isNull();
++        assertThat(GsfIdReader.requestRefresh(properties, "1")).isFalse();
++        assertThat(GsfIdReader.isRefreshComplete(properties, "1")).isFalse();
++    }
++
++    private static final class FakePropertyAccess implements GsfIdReader.PropertyAccess {
++        private String mId = "";
++        private String mReadyToken = "";
++        private String mRefreshToken;
++
++        @Override
++        public String get(String name) {
++            if (GsfIdReader.GSF_ID_PROPERTY.equals(name)) {
++                return mId;
++            }
++            assertThat(name).isEqualTo(GsfIdReader.GSF_ID_READY_PROPERTY);
++            return mReadyToken;
++        }
++
++        @Override
++        public void set(String name, String value) {
++            assertThat(name).isEqualTo(GsfIdReader.GSF_ID_REFRESH_PROPERTY);
++            mRefreshToken = value;
++        }
 +    }
 +}
 -- 
